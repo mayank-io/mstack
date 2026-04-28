@@ -1,0 +1,107 @@
+filters:
+  and:
+    - 'file.folder == "docs"'
+formulas:
+  created_date: if(created, date(created).format("YYYY-MM-DD"), "")
+properties:
+  formula.created_date:
+    displayName: Created
+views:
+  - type: table
+    name: Active Work
+    filters:
+      and:
+        - 'file.folder == "docs"'
+        - or:
+            - status == "active"
+            - status == "review"
+    order:
+      - file.name
+      - stage
+      - size
+      - work
+      - formula.created_date
+    columnSize:
+      file.name: 543
+  - type: table
+    name: Experiments
+    filters:
+      and:
+        - 'file.folder == "docs"'
+        - type == "experiment"
+        - or:
+            - status == "draft"
+            - status == "active"
+    order:
+      - file.name
+      - status
+      - stage
+      - stream
+      - work
+      - formula.created_date
+    sort:
+      - property: file.name
+        direction: DESC
+    columnSize:
+      file.name: 543
+  - type: table
+    name: Drafts
+    filters:
+      and:
+        - 'file.folder == "docs"'
+        - status == "draft"
+    order:
+      - file.name
+      - type
+      - stage
+      - size
+      - work
+      - formula.created_date
+    columnSize:
+      file.name: 543
+  - type: table
+    name: Completed
+    filters:
+      and:
+        - 'file.folder == "docs"'
+        - status == "completed"
+    order:
+      - file.name
+      - type
+      - work
+      - formula.created_date
+    columnSize:
+      file.name: 543
+    limit: 10
+  - type: table
+    name: Missing Reviews
+    filters:
+      and:
+        - 'file.folder == "docs"'
+        - status == "draft"
+        - or:
+            - type == "design"
+            - type == "impl-plan"
+    order:
+      - file.name
+      - type
+      - stage
+      - work
+    columnSize:
+      file.name: 543
+  - type: table
+    name: By Branch
+    filters:
+      and:
+        - 'file.folder == "docs"'
+        - work != ""
+    groupBy:
+      property: work
+      direction: ASC
+    order:
+      - file.name
+      - type
+      - status
+      - stage
+    columnSize:
+      file.name: 543

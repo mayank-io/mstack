@@ -1,0 +1,20 @@
+{
+  "name": "download",
+  "description": "Download content from various sources (YouTube, X, Notion, Scribd, arXiv) as local Markdown files",
+  "author": {
+    "name": "Mayank"
+  },
+  "license": "MIT",
+  "keywords": [
+    "download",
+    "export",
+    "markdown",
+    "youtube",
+    "x",
+    "twitter",
+    "notion",
+    "scribd",
+    "arxiv",
+    "alphaxiv"
+  ]
+}

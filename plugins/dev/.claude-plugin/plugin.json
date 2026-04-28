@@ -1,0 +1,9 @@
+{
+  "name": "dev",
+  "description": "Development workflow commands, skills, and doc-conventions. Code review, quality gates, engineering practices, and documentation templates with workflow enforcement.",
+  "author": {
+    "name": "Mayank"
+  },
+  "license": "MIT",
+  "keywords": ["development", "code-review", "quality", "workflow", "documentation", "conventions", "templates"]
+}

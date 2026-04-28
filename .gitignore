@@ -1,0 +1,5 @@
+# Local session memory written by the remember plugin's SessionStart hook
+.remember/
+
+# macOS
+.DS_Store

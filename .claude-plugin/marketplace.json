@@ -1,0 +1,72 @@
+{
+  "name": "mstack",
+  "owner": {
+    "name": "Mayank",
+    "email": "mayank.kumar@gmail.com"
+  },
+  "metadata": {
+    "description": "Mayank's stack of Claude Code plugins for development and continuous improvement workflows",
+    "version": "0.1.0",
+    "pluginRoot": "./plugins"
+  },
+  "plugins": [
+    {
+      "name": "ccimprove",
+      "source": "./plugins/ccimprove",
+      "description": "Analyze Claude Code usage patterns to continuously improve workflows, skills, and plugins",
+      "author": {
+        "name": "Mayank"
+      },
+      "license": "MIT",
+      "keywords": [
+        "usage-analysis",
+        "continuous-improvement",
+        "skills",
+        "plugins",
+        "meta"
+      ],
+      "category": "meta-cc"
+    },
+    {
+      "name": "dev",
+      "source": "./plugins/dev",
+      "description": "Development workflow commands, skills, and doc-conventions. Code review, quality gates, engineering practices, and documentation templates with workflow enforcement.",
+      "author": {
+        "name": "Mayank"
+      },
+      "license": "MIT",
+      "keywords": [
+        "development",
+        "code-review",
+        "quality",
+        "workflow",
+        "documentation",
+        "conventions",
+        "templates"
+      ],
+      "category": "development"
+    },
+    {
+      "name": "download",
+      "source": "./plugins/download",
+      "description": "Download content from various sources (YouTube, X, Notion, Scribd, arXiv) as local Markdown files",
+      "author": {
+        "name": "Mayank"
+      },
+      "license": "MIT",
+      "keywords": [
+        "download",
+        "export",
+        "markdown",
+        "youtube",
+        "x",
+        "twitter",
+        "notion",
+        "scribd",
+        "arxiv",
+        "alphaxiv"
+      ],
+      "category": "productivity"
+    }
+  ]
+}

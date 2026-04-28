@@ -1,0 +1,15 @@
+{
+  "name": "ccimprove",
+  "description": "Analyze Claude Code usage patterns to continuously improve workflows, skills, and plugins",
+  "author": {
+    "name": "Mayank"
+  },
+  "license": "MIT",
+  "keywords": [
+    "usage-analysis",
+    "continuous-improvement",
+    "skills",
+    "plugins",
+    "meta"
+  ]
+}
