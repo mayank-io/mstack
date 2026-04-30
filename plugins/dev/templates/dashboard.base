@@ -15,6 +15,14 @@ views:
         - or:
             - status == "active"
             - status == "review"
+        # Reference-shape types close at terminal status: active (it IS
+        # their post-promotion state) and shouldn't appear as in-flight.
+        # Add new reference types here if you introduce them.
+        - type != "kb"
+        - type != "ops-guide"
+        - type != "playbook"
+        - type != "reference"
+        - type != "checklist"
     order:
       - file.name
       - stage

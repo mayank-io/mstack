@@ -19,7 +19,18 @@ Filter by the current git branch to find docs relevant to this session's work.
 When creating a new doc, copy from docs/templates/ and fill in frontmatter (work = current branch, created = today, status = draft).
 
 When a doc is ready for the next stage, update its status frontmatter before proceeding.
-Status lifecycle: draft → active → review → completed → archived.
+
+### Status Lifecycle
+
+Two terminal states, depending on doc shape:
+
+**Workflow artifacts** (impl-plans, designs, audits, postmortems, cutover-plans, analyses, reports, reconciliations) drive a discrete piece of work. Lifecycle:
+`draft → active → review → completed → archived`
+
+**Reference specifications** (kb, ops-guide, playbook, `type: reference`, catalogs, strategy docs) ARE the live spec. Lifecycle:
+`draft → review → active` — and `active` is the terminal state. Reference docs do not flip to `completed`; they live at `active` until deleted or replaced.
+
+This split matters for the dashboard: the "Active Work" view filters out reference-shape types (`kb`, `ops-guide`, `playbook`, `reference`, `checklist`) so terminal-active references don't appear as in-flight work. If you introduce a new reference-shape type, add it to the filter in `docs/templates/dashboard.base`.
 
 ### Document Naming Convention
 
