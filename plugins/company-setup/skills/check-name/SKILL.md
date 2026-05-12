@@ -23,11 +23,35 @@ Parse from `$ARGUMENTS`:
 
 - **Candidate name** (positional, required) — the bare candidate. Can be one or more words. Quote if it contains spaces.
 - `--systems <csv>` (optional) — subset of `uspto,wa-sos,domain`. Default: all three.
-- `--class <csv>` (optional) — USPTO class filter, e.g. `35,42`. Default: no class filter (all classes).
+- `--class <csv>` (optional) — USPTO class filter, e.g. `35,42`. Default: pick from business context (see below).
 - `--json` (optional) — emit machine-readable JSON instead of markdown.
 - `--refresh` (optional) — bypass cache.
 
 If the candidate name is missing or ambiguous, ask the user before invoking.
+
+## Picking USPTO classes (do this before running)
+
+The user usually doesn't know Nice Classification — pick the classes for them, announce, run.
+
+**Procedure:**
+
+1. **If `--class` was explicitly provided, use it verbatim. No question.**
+2. **Otherwise, infer the business archetype.** Check the recent conversation for cues:
+   - "fractional CTO firm", "tech consulting", "advisory" → IT consulting archetype
+   - "SaaS", "platform", "app" → SaaS archetype
+   - "store", "DTC", "brand" → e-commerce archetype
+   - "restaurant", "café", "bar" → food service archetype
+   - "coaching", "training", "course" → education archetype
+   - (etc.)
+3. **Look up the matching class set** in `${CLAUDE_PLUGIN_ROOT}/playbooks/uspto-nice-classes.md` (the "Business archetype → class map" table is the lookup).
+4. **Announce the choice in ONE LINE** before running. Example:
+   > Searching USPTO classes **35** (business consulting) and **42** (IT consulting) — standard for a fractional CTO firm. Override with `/check-name <name> --class X,Y` if you want different scope.
+5. **If you can't infer the archetype** from context AND the user hasn't told you, ask ONCE with `AskUserQuestion`. The options should be drawn from the archetype map. Don't dump the full 45-class taxonomy — give 4 archetypes max plus "Other (describe)".
+6. **Run** with the picked `--class`.
+
+**After the run, if the verdict is `crowded` or `blocked`:**
+- If a class is the source of the block, mention the "Strategic-narrowing tactics" from `uspto-nice-classes.md` — sometimes filing in just one of the two classes with a narrowed goods/services description is a workaround.
+- Re-run with the narrower class set if the user wants to explore that path.
 
 ## Prerequisites
 
