@@ -1,0 +1,17 @@
+{
+  "name": "company-setup",
+  "description": "Tools for forming a company — name availability checks across USPTO trademarks, state Secretary of State registrations, and domain registrars. Produces an aggregated report so you can decide before filing.",
+  "author": {
+    "name": "Mayank"
+  },
+  "license": "MIT",
+  "keywords": [
+    "company-formation",
+    "llc",
+    "trademark",
+    "uspto",
+    "secretary-of-state",
+    "domain-check",
+    "naming"
+  ]
+}

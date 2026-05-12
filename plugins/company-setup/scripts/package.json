@@ -1,0 +1,15 @@
+{
+  "name": "company-setup-scripts",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "description": "Scripts powering the company-setup plugin's check-name skill. Delegates browser interactions to gstack browse.",
+  "scripts": {
+    "check": "node cli.mjs",
+    "self-test": "node cli.mjs --self-test"
+  },
+  "dependencies": {},
+  "engines": {
+    "node": ">=18"
+  }
+}

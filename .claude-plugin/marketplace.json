@@ -67,6 +67,25 @@
         "alphaxiv"
       ],
       "category": "productivity"
+    },
+    {
+      "name": "company-setup",
+      "source": "./plugins/company-setup",
+      "description": "Tools for forming a company. The check-name skill sweeps USPTO trademarks, the WA Secretary of State, and major domain registrars and produces a single aggregated availability report.",
+      "author": {
+        "name": "Mayank"
+      },
+      "license": "MIT",
+      "keywords": [
+        "company-formation",
+        "llc",
+        "trademark",
+        "uspto",
+        "secretary-of-state",
+        "domain-check",
+        "naming"
+      ],
+      "category": "productivity"
     }
   ]
 }
