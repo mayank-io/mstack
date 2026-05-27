@@ -6,7 +6,7 @@
   },
   "metadata": {
     "description": "Mayank's stack of Claude Code plugins for development and continuous improvement workflows",
-    "version": "0.2.0",
+    "version": "0.3.0",
     "pluginRoot": "./plugins"
   },
   "plugins": [
@@ -86,6 +86,27 @@
         "naming"
       ],
       "category": "productivity"
+    },
+    {
+      "name": "think",
+      "source": "./plugins/think",
+      "description": "Parallel divergent ideation for coding agents. The adhd skill spawns N isolated reasoning branches under different cognitive frames, scores them, prunes traps, and deepens the survivors — escaping premature convergence on architecture, naming, API design, fuzzy debugging, and strategy. Vendored from UditAkhourii/adhd.",
+      "author": {
+        "name": "Udit Akhouri",
+        "url": "https://github.com/UditAkhourii/adhd"
+      },
+      "license": "MIT",
+      "keywords": [
+        "ideation",
+        "brainstorming",
+        "divergent-thinking",
+        "tree-of-thought",
+        "reasoning",
+        "architecture",
+        "naming",
+        "design"
+      ],
+      "category": "development"
     }
   ]
 }

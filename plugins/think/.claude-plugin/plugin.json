@@ -1,0 +1,19 @@
+{
+  "name": "think",
+  "description": "Parallel divergent ideation for coding agents. The `adhd` skill spawns N isolated reasoning branches under different cognitive frames, scores them, prunes traps, and deepens the survivors — escaping the premature convergence of single-pass reasoning. Reach for it on architecture, naming, API design, fuzzy debugging, and strategy. Vendored from UditAkhourii/adhd.",
+  "author": {
+    "name": "Udit Akhouri",
+    "url": "https://github.com/UditAkhourii/adhd"
+  },
+  "license": "MIT",
+  "keywords": [
+    "ideation",
+    "brainstorming",
+    "divergent-thinking",
+    "tree-of-thought",
+    "reasoning",
+    "architecture",
+    "naming",
+    "design"
+  ]
+}
