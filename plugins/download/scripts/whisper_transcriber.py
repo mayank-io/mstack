@@ -59,6 +59,11 @@ def download_audio(video_id: str, output_dir: Path, cookies_file: str | None = N
         "--quiet",
         "--progress",
         "--remote-components", "ejs:github",  # Required for YouTube JS challenges
+        # The default/web/ios/tv clients are blocked by YouTube's SABR/DRM and
+        # PO-token experiments ("DRM protected" / "Requested format is not
+        # available"). The android client still serves a plain audio stream and
+        # needs no n-challenge solving, so prefer it first.
+        "--extractor-args", "youtube:player_client=android,web,tv",
     ]
 
     # Use cookies file if provided (Netscape format)

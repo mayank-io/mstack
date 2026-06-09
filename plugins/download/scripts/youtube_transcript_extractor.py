@@ -221,6 +221,95 @@ def try_youtube_transcript_api(video_id: str) -> dict | None:
 
 
 # ---------------------------------------------------------------------------
+# Caption integrity scan
+# ---------------------------------------------------------------------------
+# YouTube auto-captions silently drop words — disproportionately NUMBERS in
+# Q&A (the highest-value content in a finance/research video). The gap is
+# invisible in the text but recoverable from the audio. This scan flags the
+# windows where a figure was most likely dropped so a caller can re-transcribe
+# just those seconds with Whisper (see verify_caption_window.py) instead of
+# re-transcribing the whole video. The signal that maps cleanly to the failure
+# class: a question that demands a number, answered by a span with no number.
+
+# Tokens that count as "a number was present" in an answer.
+_NUM_RE = re.compile(
+    r'\d|%|\bpercent\b'
+    r'|\b(?:half|third|quarter|double|triple|dozen)\b'
+    r'|\b(?:hundred|thousand|million|billion|trillion)\b'
+    r'|\b(?:one|two|three|four|five|six|seven|eight|nine|ten'
+    r'|eleven|twelve|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety)\b',
+    re.IGNORECASE,
+)
+
+# Questions that strongly imply a numeric answer.
+_QUANT_Q_RE = re.compile(
+    r'\bwhat\s+percentage\b|\bwhat\s+percent\b'
+    r'|\bwhat\s+(?:fraction|share|portion|multiple|valuation|margin)\b'
+    r"|\bwhat(?:'s| is)\s+the\s+"
+    r'(?:number|revenue|margin|valuation|multiple|price|size|cap|count|figure|percentage|fraction)\b'
+    r'|\bhow\s+much\b|\bhow\s+many\b|\bhow\s+big\b|\bhow\s+fast\b|\bhow\s+large\b'
+    r'|\bballpark\b|\border\s+of\s+magnitude\b',
+    re.IGNORECASE,
+)
+
+
+def _parse_ts_line(line: str):
+    """Parse a 'M:SS text' transcript line into (start_seconds, text)."""
+    m = re.match(r'^(\d+):(\d{2})\s+(.*)$', line)
+    if not m:
+        return None
+    return int(m.group(1)) * 60 + int(m.group(2)), m.group(3)
+
+
+def scan_caption_integrity(transcript_text: str | None,
+                           answer_window_s: int = 28,
+                           pad_before_s: int = 4) -> list[dict]:
+    """Flag spots where the caption likely dropped a figure.
+
+    Returns a list of {start_seconds, end_seconds, reason, snippet} windows,
+    each a candidate for targeted Whisper re-transcription. High precision by
+    design: a flagged window with no real drop just costs one cheap audio clip.
+    """
+    if not transcript_text:
+        return []
+    parsed = [p for p in (_parse_ts_line(l) for l in transcript_text.splitlines()) if p]
+    n = len(parsed)
+    if not n:
+        return []
+
+    warnings = []
+    for i, (t, text) in enumerate(parsed):
+        if not _QUANT_Q_RE.search(text):
+            continue
+        # Collect the answer span: lines from the question up to +answer_window_s.
+        parts, j = [], i
+        while j < n and parsed[j][0] <= t + answer_window_s:
+            parts.append(parsed[j][1])
+            j += 1
+        answer = ' '.join(parts)
+        if _NUM_RE.search(answer):
+            continue  # answered with a number — nothing to recover
+        warnings.append({
+            'start_seconds': max(0, t - pad_before_s),
+            'end_seconds': t + answer_window_s,
+            'reason': 'quantitative question with no number in the answer window — '
+                      'caption may have dropped a figure; re-transcribe with Whisper',
+            'snippet': answer[:200],
+        })
+
+    # Merge overlapping windows so adjacent flags become one recheck clip.
+    warnings.sort(key=lambda w: w['start_seconds'])
+    merged: list[dict] = []
+    for w in warnings:
+        if merged and w['start_seconds'] <= merged[-1]['end_seconds']:
+            merged[-1]['end_seconds'] = max(merged[-1]['end_seconds'], w['end_seconds'])
+            merged[-1]['snippet'] = (merged[-1]['snippet'] + ' … ' + w['snippet'])[:320]
+        else:
+            merged.append(dict(w))
+    return merged
+
+
+# ---------------------------------------------------------------------------
 # Playwright-based extraction (fallback)
 # ---------------------------------------------------------------------------
 
@@ -698,6 +787,18 @@ async def main():
             'speakers': [],
             'error': 'No transcript available from any source',
         }
+
+    # --- Caption integrity scan (flag spots where a figure was likely dropped) ---
+    if result.get('transcript') and not result.get('error'):
+        warnings = scan_caption_integrity(result['transcript'])
+        result['caption_warnings'] = warnings
+        if warnings:
+            print(f"\n⚠ Caption integrity: {len(warnings)} window(s) where a number may have "
+                  f"been dropped — re-transcribe with verify_caption_window.py:", file=sys.stderr)
+            for w in warnings:
+                s, e = w['start_seconds'], w['end_seconds']
+                print(f"   {s // 60}:{s % 60:02d}-{e // 60}:{e % 60:02d}  {w['snippet'][:90]}",
+                      file=sys.stderr)
 
     # --- Write output ---
     if args.output:
