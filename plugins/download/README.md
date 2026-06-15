@@ -80,11 +80,51 @@ headless: false
 
 ---
 
+### `/download:blog-post`
+
+Save a blog post/article (Medium, Substack, personal blogs) as a self-contained folder: clean markdown via Defuddle, all inline images recovered via Playwright (which Defuddle drops as lazy-loaded), and any Vedic astrology charts digitized via `/download:vedic-chart`.
+
+**Usage:**
+```bash
+/download:blog-post <article URL> [output_dir]
+```
+
+**Features:**
+- Defuddle for clean, low-token article text + metadata (title/author/published)
+- Trims site chrome (Medium nav/footer) by structural landmarks
+- Recovers high-res images in document order via Playwright, anchored to their headings
+- Writes YAML frontmatter and a portable `images/` subfolder
+- Invokes `download:vedic-chart` when the article contains horoscope charts
+
+**Output:** `<output_dir>/<slug>/<slug>.md` + `<output_dir>/<slug>/images/`
+
+---
+
+### `/download:vedic-chart`
+
+Convert a Vedic/Jyotish horoscope chart image (Jagannatha Hora / Parashara's Light printout) into structured JSON + ASCII North-Indian and South-Indian diagrams.
+
+**Usage:**
+```bash
+/download:vedic-chart <chart image or chart .json> [output_dir]
+```
+
+**Features:**
+- Reads the image's bottom longitude table (ground truth) via the `claude` vision CLI
+- Computes houses deterministically; renders both North-Indian and South-Indian charts
+- `--emit {json,ascii,both}`, `--style {north,south,both}`, sidecar caching, render-only from `.json`
+- Standalone script (`scripts/chart_to_ascii.py`) — plain `python3`, no virtualenv
+
+**Output:** `<stem>.json` (structured chart) + `<stem>.txt` (ASCII charts)
+
+---
+
 ## Prerequisites
 
 ```bash
 pip3 install httpx playwright
 python3 -m playwright install chromium
+npm install -g defuddle-cli   # for /download:blog-post
 ```
 
 ## Installation

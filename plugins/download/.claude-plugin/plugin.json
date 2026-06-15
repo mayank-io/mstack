@@ -1,6 +1,6 @@
 {
   "name": "download",
-  "description": "Download content from various sources (YouTube, X, Notion, Scribd, arXiv) as local Markdown files",
+  "description": "Download content from various sources (YouTube, X, Notion, Scribd, arXiv, blogs) as local Markdown files, and digitize Vedic astrology charts to JSON + ASCII",
   "author": {
     "name": "Mayank"
   },
@@ -15,6 +15,12 @@
     "notion",
     "scribd",
     "arxiv",
-    "alphaxiv"
+    "alphaxiv",
+    "blog",
+    "article",
+    "defuddle",
+    "vedic",
+    "astrology",
+    "chart"
   ]
 }
