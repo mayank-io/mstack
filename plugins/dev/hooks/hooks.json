@@ -16,16 +16,6 @@
             "timeout": 5000
           }
         ]
-      },
-      {
-        "matcher": "Agent",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/pre-agent-spawn.sh",
-            "timeout": 5000
-          }
-        ]
       }
     ],
     "PostToolUse": [
