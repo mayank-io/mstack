@@ -1,6 +1,6 @@
 ---
 name: x-post
-description: "Extract content from an X/Twitter post, thread, or article using Playwright. Detects threads automatically and downloads images locally. Use when the user says \"read this x post\", \"get content from this tweet\", \"what does this x post say\", \"extract this tweet\", or shares an x.com/twitter.com URL."
+description: "Extract content from an X/Twitter post, thread, or article using Playwright. Detects threads automatically, walks back to the first post when the shared link lands mid-thread, and downloads images locally. Use when the user says \"read this x post\", \"get content from this tweet\", \"what does this x post say\", \"extract this tweet\", \"get the whole thread\", or shares an x.com/twitter.com URL."
 ---
 
 # Download X Post
@@ -103,6 +103,82 @@ async (page) => {
 
 **Image validation:** If `expectedImageCount > 0` but `images.length === 0`, images failed to load. Re-run the extraction once more.
 
+### Step 2.5: Find the Thread Root (Walk Backward to the First Post)
+
+**A shared link is frequently NOT the first post in its thread** — users often copy a middle or final post. Before treating the focal post as the start, check whether earlier posts by the same author exist ABOVE it. If they do, the real thread begins higher up and everything downstream must start from that root.
+
+When a post is a self-reply inside a thread, X renders its ancestor posts ABOVE the focal `<article>` in the conversation (DOM order: ancestors → focal → replies). Detect them:
+
+```javascript
+async (page) => {
+  await page.goto('FOCAL_URL_HERE');
+  await page.waitForSelector('article', { timeout: 15000 });
+  await page.waitForTimeout(1500);
+
+  const focalId = 'FOCAL_ID_HERE';
+  const focalHandle = 'FOCAL_HANDLE_HERE';
+
+  return await page.evaluate(({ focalId, handle }) => {
+    const articles = Array.from(document.querySelectorAll('article'));
+
+    const handleOf = (a) => {
+      for (const link of a.querySelectorAll('a[role="link"]')) {
+        const href = link.getAttribute('href');
+        if (href && href.match(/^\/[^\/]+$/) && !href.includes('/status/')) return href.slice(1);
+      }
+      return '';
+    };
+    // Prefer the timestamp permalink — that anchor points to the article's OWN status id
+    const statusIdOf = (a) => {
+      const timeAnchor = a.querySelector('time')?.closest('a[href*="/status/"]');
+      const m = (timeAnchor?.getAttribute('href') || '').match(/\/status\/(\d+)/);
+      if (m) return m[1];
+      for (const link of a.querySelectorAll('a[href*="/status/"]')) {
+        const mm = link.getAttribute('href').match(/\/status\/(\d+)/);
+        if (mm) return mm[1];
+      }
+      return '';
+    };
+
+    // Locate the focal article, then collect same-author posts ABOVE it
+    let focalIdx = articles.findIndex(a => statusIdOf(a) === focalId);
+    if (focalIdx === -1) focalIdx = 0;
+
+    const ancestors = [];
+    for (let i = 0; i < focalIdx; i++) {
+      if (handleOf(articles[i]).toLowerCase() === handle.toLowerCase()) {
+        const sid = statusIdOf(articles[i]);
+        if (sid && sid !== focalId) ancestors.push(sid);
+      }
+    }
+
+    // Root = earliest (lowest) Snowflake ID among ancestors + focal
+    const cluster = [...new Set([...ancestors, focalId])]
+      .sort((a, b) => a.length - b.length || (a < b ? -1 : a > b ? 1 : 0));
+
+    return { hasEarlier: ancestors.length > 0, rootId: cluster[0], ancestors };
+  }, { focalId, handle: focalHandle });
+}
+```
+
+**Replace** `FOCAL_URL_HERE`, `FOCAL_ID_HERE`, and `FOCAL_HANDLE_HERE` with the values from Step 2.
+
+**Interpreting results:**
+
+- **`hasEarlier: false`** — the link IS the first post (or a standalone post). Continue normally.
+- **`hasEarlier: true`** — the link is mid-thread. Set the **root post** = `rootId`, navigate to `https://x.com/{handle}/status/{rootId}`, re-run Step 2 extraction on it, and treat `rootId` as the first post for every downstream step.
+
+**Robustness — ancestors can lazy-load.** If `hasEarlier` is `false` but the focal post looks like a continuation (starts mid-sentence or with a connector like "And"/"But", opens with a list marker, or the article shows a "Show this thread" affordance), scroll UP a few times and re-check before concluding it is the first post:
+
+```javascript
+async (page) => {
+  for (let i = 0; i < 5; i++) {
+    await page.evaluate(() => window.scrollBy(0, -window.innerHeight));
+    await page.waitForTimeout(800);
+  }
+}
+```
+
 ### Step 3: Detect X Article (Long-Form)
 
 If `content` is empty or very short (< 50 characters), the post is an X Article. Fall back to accessibility snapshot:
@@ -124,9 +200,9 @@ For X Articles, preserve:
 
 ### Step 4: Thread Detection
 
-**IMPORTANT: Always check for threads after extracting the focal post.**
+**IMPORTANT: Always check for threads — and always start from the FIRST post (the root from Step 2.5), not the originally-shared link.**
 
-While still on the page from Step 2, scroll down to load thread posts, then find all articles by the same author:
+On the first post's page, scroll down to load thread posts, then find all articles by the same author. Capture a content snippet and a "replying to another user" flag for each, so the candidates can be filtered down to the genuine thread:
 
 ```javascript
 async (page) => {
@@ -169,9 +245,14 @@ async (page) => {
         if (match) { statusId = match[1]; break; }
       }
 
+      // Signals for thread-membership filtering (see Interpreting results)
+      const tweetText = article.querySelector('[data-testid="tweetText"]');
+      const snippet = (tweetText?.innerText || '').slice(0, 80);
+      const isReplyToOther = /(^|\n)Replying to/.test(article.innerText || '');
+
       if (statusId && !seen.has(statusId)) {
         seen.add(statusId);
-        posts.push({ statusId });
+        posts.push({ statusId, snippet, isReplyToOther });
       }
     }
 
@@ -190,14 +271,19 @@ async (page) => {
 
 **Interpreting results:**
 
-- **1 post found**: Not a thread. Continue with the focal post data from Step 2.
-- **Multiple posts found**: This is a thread. For each thread post OTHER than the focal post:
+- **1 post found**: Not a thread. Continue with the first post's data.
+- **Multiple posts found**: These are *candidates*, not all thread members. A thread is posted in one sitting, so genuine members form a tight cluster of near-sequential Snowflake IDs with near-identical timestamps. The author's later replies to commenters get swept up here too — **filter them out first**:
+  - **Keep** the contiguous self-reply chain that starts at the root: posts whose IDs increment by small amounts with no large gap from the previous kept post (the cluster typically spans seconds to a few minutes).
+  - **Drop** any post flagged `isReplyToOther: true`, and any post sitting after a large ID/timestamp gap from the previous thread member — those are the author replying to other users, NOT part of the thread. (This is the most common false positive: e.g. a 7-post thread where IDs jump from `…594659836065` to `…681933271330968` — everything from the jump onward is replies-to-commenters.)
+  - Sanity-check with the `snippet`s: real thread posts continue one narrative; dropped ones are short one-liners aimed at someone else ("Thank you!", "Congrats!", or starting with `@handle`).
+
+  For each KEPT post OTHER than the root:
   1. Navigate to `https://x.com/{handle}/status/{statusId}`
   2. Run the Step 2 extraction code to get full content and images
   3. If content is empty/short, apply Step 3 (X Article detection) for that post
   4. Collect all posts in the chronological order returned by the script
 
-After extracting all thread posts, assemble the complete thread data as an array of posts sorted chronologically.
+After extracting all kept posts, assemble the complete thread data as an array sorted chronologically (root first).
 
 ### Step 5: Download Images
 
@@ -277,8 +363,10 @@ Same as single post format but with section headings preserved and `[Image: cont
 - X blocks direct HTTP fetching — Playwright is required
 - Regular tweets have `[data-testid="tweetText"]`; X Articles do not
 - Thread posts are detected by finding multiple `<article>` elements by the same author
+- The shared link may be mid-thread — Step 2.5 walks back to the first post via the ancestor articles rendered ABOVE the focal tweet
+- Same-author ≠ same-thread: the author's replies to commenters appear by the same handle. Distinguish real thread members by tight ID/timestamp clustering and `isReplyToOther`; large ID gaps mark the end of the thread
 - Thread posts in the page view may be truncated — always navigate to individual URLs for full content
-- Status IDs are Snowflake-based: ascending = chronological order
+- Status IDs are Snowflake-based: ascending = chronological order; threads posted together have near-adjacent IDs
 - Images are downloaded at full resolution (`name=large`)
 - If the page requires login, extraction may be limited
 
@@ -295,3 +383,7 @@ Result: Detects empty tweetText, falls back to snapshot, extracts full article w
 ### Example 3: Thread
 Input: `/download:x-post https://x.com/bourboncap/status/2020489596505592084`
 Result: Extracts focal post, detects 5 more posts by same author, navigates to each, downloads all images, presents complete 6-post thread
+
+### Example 4: Mid-thread link (walk back to the first post)
+Input: `/download:x-post https://x.com/ericjackson/status/1997633594659836065`
+Result: Step 2.5 finds 6 earlier same-author posts above the focal → resets the root to `…633559859790018` ("…here's the truth 👇"). Step 4 collects candidates, drops the author's later replies-to-commenters after the ID gap, and presents the genuine 7-post thread in order (the originally-shared link turns out to be post 7/7).
