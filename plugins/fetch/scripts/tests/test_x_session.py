@@ -60,7 +60,7 @@ def test_detect_abort_rate_limit():
     from x_session import detect_abort
     assert detect_abort("Rate limit exceeded", "https://x.com/vedanjanam") == "rate_limited"
 
-def test_detect_abort_challenge():
+def test_detect_abort_interstitial():
     from x_session import detect_abort
     assert detect_abort("Something went wrong. Try reloading.", "https://x.com/x") == "interstitial"
 

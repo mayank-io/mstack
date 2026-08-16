@@ -62,7 +62,7 @@ async def download_all(urls_by_post: dict, out_dir: str, max_concurrency: int = 
     os.makedirs(out_dir, exist_ok=True)
     semaphore = asyncio.Semaphore(max_concurrency)
 
-    jobs = []  # (status_id, index, filename, coroutine)
+    jobs = []  # (status_id, filename, coroutine)
     for status_id, post in urls_by_post.items():
         handle = post["handle"]
         for index, url in enumerate(post["urls"], start=1):

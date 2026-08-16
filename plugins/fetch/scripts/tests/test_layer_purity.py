@@ -1,6 +1,6 @@
 """download:x-account must emit NO Obsidian/vault syntax. Grep the render
 output surface. See design §10.4."""
-import sys, os, glob
+import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 def test_no_wikilinks_in_render_module_output():
