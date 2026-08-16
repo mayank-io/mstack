@@ -4,6 +4,23 @@ import re
 _FORBIDDEN = re.compile(r'[/\\:"?*<>|]')
 _WS = re.compile(r'\s+')
 
+
+def _fmt_count(n: int) -> str:
+    """Format a count with thousands separators and K/M abbreviation.
+    Rules:
+    - Always use thousands separators (e.g., 1,240).
+    - Abbreviate to K (thousands) / M (millions) when n >= 10_000.
+    - Use one decimal place for K/M values (e.g., 88.4K, 1.2M).
+    Examples: 312 -> "312", 1240 -> "1,240", 88400 -> "88.4K", 1234567 -> "1.2M".
+    """
+    if n < 1_000:
+        return str(n)
+    if n < 10_000:
+        return f"{n:,}"
+    if n < 1_000_000:
+        return f"{n / 1_000:.1f}K"
+    return f"{n / 1_000_000:.1f}M"
+
 def slugify(text: str, max_len: int = 60) -> str:
     s = _FORBIDDEN.sub("", text)
     s = _WS.sub(" ", s).strip()
@@ -93,7 +110,10 @@ def render_note(post: dict) -> str:
         lines += _image_lines(post.get("image_files"))
         lines.append("")
 
-    lines.append(f"**Engagement:** {likes} likes · {reposts} reposts · {views} views")
+    lines.append("")
+    lines.append("---")
+    lines.append("")
+    lines.append(f"**Engagement:** {_fmt_count(likes)} likes · {_fmt_count(reposts)} reposts · {_fmt_count(views)} views")
     lines.append(f"**Posted:** {post['date']}")
 
     return "\n".join(lines) + "\n"

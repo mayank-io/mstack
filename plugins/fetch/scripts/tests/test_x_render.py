@@ -52,3 +52,32 @@ def test_render_thread_numbers_sections():
         "image_files": [],
     })
     assert "## 1." in md and "## 2." in md
+
+def test_render_note_engagement_line_formatted_with_separator():
+    from x_render import render_note
+    md = render_note({
+        "status_id": "1", "handle": "h", "author_name": "H",
+        "date": "2026-01-01", "date_captured": "2026-08-16",
+        "post_type": "post", "thread_length": 0,
+        "metrics": {"likes": 1240, "reposts": 312, "views": 88400}, "media": 0,
+        "content": "Test post", "image_files": [],
+    })
+    # Assert the exact engagement line with formatted numbers
+    assert "**Engagement:** 1,240 likes · 312 reposts · 88.4K views" in md
+    # Assert the separator appears before the engagement line
+    lines = md.split("\n")
+    engagement_idx = None
+    separator_idx = None
+    for i, line in enumerate(lines):
+        if "**Engagement:**" in line:
+            engagement_idx = i
+        if line.strip() == "---" and engagement_idx is None:
+            separator_idx = i
+    assert engagement_idx is not None, "Engagement line not found"
+    # Find the most recent separator before engagement
+    for i in range(engagement_idx - 1, -1, -1):
+        if lines[i].strip() == "---":
+            separator_idx = i
+            break
+    assert separator_idx is not None, "Separator not found before engagement"
+    assert separator_idx < engagement_idx, "Separator should come before engagement line"
