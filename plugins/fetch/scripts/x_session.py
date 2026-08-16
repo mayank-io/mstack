@@ -106,10 +106,12 @@ class Budget:
 # Order matters — a login-wall URL takes precedence over any page text, and
 # challenge/interstitial/rate-limit/locked are checked in this fixed order
 # so a page matching multiple markers still resolves deterministically.
-_CHALLENGE_MARKERS = ("arkose", "captcha", "id=\"challenge")
+# Note: page_text is expected to be visible rendered text; id="challenge is a best-effort
+# DOM-fragment fallback marker and should not be relied upon as the sole challenge signal.
+_CHALLENGE_MARKERS = ("arkose", "id=\"challenge")
 _INTERSTITIAL_MARKER = "Something went wrong. Try reloading."
-_RATE_LIMIT_MARKERS = ("rate limit exceeded", "you are rate limited")
-_LOCKED_MARKERS = ("unusual activity", "your account has been locked", "account suspended")
+_RATE_LIMIT_MARKERS = ("rate limit exceeded",)
+_LOCKED_MARKERS = ("unusual activity", "your account has been locked")
 
 
 def detect_abort(page_text: str, url: str) -> str | None:

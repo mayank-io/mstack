@@ -68,6 +68,21 @@ def test_detect_abort_none_on_normal_page():
     from x_session import detect_abort
     assert detect_abort("Just some tweets here", "https://x.com/vedanjanam") is None
 
+def test_detect_abort_ignores_captcha_in_normal_tweet():
+    from x_session import detect_abort
+    # bare "captcha" in normal tweet should NOT trigger abort
+    assert detect_abort("this captcha is impossible lol", "https://x.com/vedanjanam") is None
+
+def test_detect_abort_ignores_third_party_suspension_talk():
+    from x_session import detect_abort
+    # third-person "account suspended" in normal tweet should NOT trigger abort
+    assert detect_abort("his account was suspended last week, wild", "https://x.com/vedanjanam") is None
+
+def test_detect_abort_still_catches_real_lock():
+    from x_session import detect_abort
+    # first/second-person locked phrase SHOULD trigger abort
+    assert detect_abort("your account has been locked", "https://x.com/vedanjanam") == "locked"
+
 
 def test_backoff_capped_at_three():
     from x_session import backoff_delays
