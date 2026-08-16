@@ -68,3 +68,76 @@ class Pacer:
     def should_break(self, minutes_active: float) -> bool:
         """True once minutes_active exceeds config['max_session_minutes']."""
         return minutes_active > self._config["max_session_minutes"]
+
+
+class Budget:
+    """Per-day render budget backed by durable state (Task 16, design §8.4).
+
+    Delegates all counting to `state` (an `x_state.ArchiveState`), so the
+    budget is enforced in code across process restarts rather than relying
+    on in-session discipline: a fresh `Budget` constructed over the same
+    state and day sees any prior charges.
+
+    Args:
+        state: an `x_state.ArchiveState` instance.
+        day: calendar day key (e.g. "2026-08-16") the budget applies to.
+        limit: maximum renders allowed for `day`.
+    """
+
+    def __init__(self, state, day: str, limit: int):
+        self._state = state
+        self._day = day
+        self._limit = limit
+
+    def remaining(self) -> int:
+        """Renders left for the day: limit minus what's already persisted."""
+        return self._limit - self._state.rendered_today(self._day)
+
+    def charge(self, n: int = 1) -> None:
+        """Persist `n` more renders against the day via the state layer."""
+        self._state.bump_rendered(self._day, n)
+
+    def exhausted(self) -> bool:
+        """True once remaining() has hit zero or gone negative."""
+        return self.remaining() <= 0
+
+
+# detect_abort(): ordered checks against the design §8.3 abort-reason list.
+# Order matters — a login-wall URL takes precedence over any page text, and
+# challenge/interstitial/rate-limit/locked are checked in this fixed order
+# so a page matching multiple markers still resolves deterministically.
+_CHALLENGE_MARKERS = ("arkose", "captcha", "id=\"challenge")
+_INTERSTITIAL_MARKER = "Something went wrong. Try reloading."
+_RATE_LIMIT_MARKERS = ("rate limit exceeded", "you are rate limited")
+_LOCKED_MARKERS = ("unusual activity", "your account has been locked", "account suspended")
+
+
+def detect_abort(page_text: str, url: str) -> str | None:
+    """Classify a page as an abort condition, or None if it looks normal.
+
+    Args:
+        page_text: rendered page text (or empty string) to scan.
+        url: current page URL.
+
+    Returns:
+        One of "login_wall", "challenge", "interstitial", "rate_limited",
+        "locked", or None if no abort condition is detected.
+    """
+    if "/i/flow/login" in url:
+        return "login_wall"
+
+    lower = page_text.lower()
+
+    if any(marker in lower for marker in _CHALLENGE_MARKERS):
+        return "challenge"
+
+    if _INTERSTITIAL_MARKER in page_text:
+        return "interstitial"
+
+    if any(marker in lower for marker in _RATE_LIMIT_MARKERS):
+        return "rate_limited"
+
+    if any(marker in lower for marker in _LOCKED_MARKERS):
+        return "locked"
+
+    return None

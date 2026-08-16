@@ -33,3 +33,37 @@ def test_seeded_pacer_is_deterministic():
     a = [Pacer(seed=7, config=CFG).scroll_dwell() for _ in range(5)]
     b = [Pacer(seed=7, config=CFG).scroll_dwell() for _ in range(5)]
     assert a == b
+
+
+def test_budget_charges_and_persists(tmp_path):
+    from x_session import Budget
+    from x_state import ArchiveState
+    st = ArchiveState(str(tmp_path))
+    b = Budget(st, "2026-08-16", limit=5500)
+    b.charge(10)
+    assert b.remaining() == 5490
+    # a fresh Budget over the same state sees the persisted charge
+    assert Budget(ArchiveState(str(tmp_path)), "2026-08-16", 5500).remaining() == 5490
+
+def test_budget_exhausted_at_limit(tmp_path):
+    from x_session import Budget
+    from x_state import ArchiveState
+    b = Budget(ArchiveState(str(tmp_path)), "2026-08-16", limit=5)
+    b.charge(5)
+    assert b.exhausted() is True
+
+def test_detect_abort_login_wall():
+    from x_session import detect_abort
+    assert detect_abort("", "https://x.com/i/flow/login") == "login_wall"
+
+def test_detect_abort_rate_limit():
+    from x_session import detect_abort
+    assert detect_abort("Rate limit exceeded", "https://x.com/vedanjanam") == "rate_limited"
+
+def test_detect_abort_challenge():
+    from x_session import detect_abort
+    assert detect_abort("Something went wrong. Try reloading.", "https://x.com/x") == "interstitial"
+
+def test_detect_abort_none_on_normal_page():
+    from x_session import detect_abort
+    assert detect_abort("Just some tweets here", "https://x.com/vedanjanam") is None
