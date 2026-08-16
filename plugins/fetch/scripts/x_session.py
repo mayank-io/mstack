@@ -27,6 +27,16 @@ _READ_NOISE_SIGMA = 2.5
 # scroll_fraction(): uniform draw within this fixed range.
 _SCROLL_FRACTION_RANGE = (0.6, 1.4)
 
+# Fallback defaults when a partial config omits a key (design §8.4). Callers
+# normally pass a full config; these keep a partial config from raising.
+_DEFAULT_SCROLL_DWELL = (2.5, 7.0)
+_DEFAULT_READ_DWELL = (8.0, 35.0)
+_DEFAULT_MAX_SESSION_MINUTES = 40
+_DEFAULT_SESSION_BREAK = (600.0, 1800.0)  # 10-30 min idle break
+
+# should_backtrack(): probability of a short re-read scroll-up per tick.
+_BACKTRACK_PROB = 1.0 / 12.0
+
 
 class Pacer:
     """Seeded pacing model for a single archive session.
@@ -45,7 +55,7 @@ class Pacer:
 
     def scroll_dwell(self) -> float:
         """Right-skewed dwell time within config['scroll_dwell_range']."""
-        lo, hi = self._config["scroll_dwell_range"]
+        lo, hi = self._config.get("scroll_dwell_range", _DEFAULT_SCROLL_DWELL)
         span = hi - lo
         raw = self._rng.lognormvariate(_SCROLL_MU, _SCROLL_SIGMA)
         scaled = lo + (raw / _SCROLL_DIVISOR) * span
@@ -53,7 +63,7 @@ class Pacer:
 
     def read_dwell(self, content_len: int) -> float:
         """Dwell time within config['read_dwell_range'], scaled by length."""
-        lo, hi = self._config["read_dwell_range"]
+        lo, hi = self._config.get("read_dwell_range", _DEFAULT_READ_DWELL)
         capped_len = min(max(content_len, 0), _READ_LENGTH_CAP)
         length_term = (capped_len ** 0.5) * _READ_LENGTH_SCALE
         noise = self._rng.gauss(0, _READ_NOISE_SIGMA)
@@ -67,7 +77,20 @@ class Pacer:
 
     def should_break(self, minutes_active: float) -> bool:
         """True once minutes_active exceeds config['max_session_minutes']."""
-        return minutes_active > self._config["max_session_minutes"]
+        return minutes_active > self._config.get(
+            "max_session_minutes", _DEFAULT_MAX_SESSION_MINUTES)
+
+    def session_break_seconds(self) -> float:
+        """A randomized long idle break, within config['session_break_range']
+        (default 10-30 min). Called when should_break() fires so the session
+        has human-shaped rest gaps, not just per-action jitter (design §8.2)."""
+        lo, hi = self._config.get("session_break_range", _DEFAULT_SESSION_BREAK)
+        return self._rng.uniform(lo, hi)
+
+    def should_backtrack(self) -> bool:
+        """Occasionally True (~1 in 12) to trigger a short scroll-up + pause,
+        mimicking a human re-reading (design §8.2)."""
+        return self._rng.random() < _BACKTRACK_PROB
 
 
 class Budget:
@@ -100,6 +123,28 @@ class Budget:
     def exhausted(self) -> bool:
         """True once remaining() has hit zero or gone negative."""
         return self.remaining() <= 0
+
+
+def throttle_delay(timestamps, now, max_per_hour, window_s=3600.0):
+    """Seconds to sleep to keep the render rate under `max_per_hour`.
+
+    Per-action jitter defeats timing-regularity detection but does nothing
+    about raw VOLUME per unit time (design §8.1) — sustained thousands/hour is
+    a bot shape no matter how well-spaced each action is. This is the ceiling
+    that keeps throughput human-shaped.
+
+    Given the timestamps (seconds) of recent renders and the current time,
+    returns 0 if fewer than `max_per_hour` renders fall inside the trailing
+    `window_s`; otherwise the seconds until the oldest in-window render ages
+    out, at which point one more render is allowed. Pure — the caller supplies
+    `now`, so nothing here reads the clock.
+    """
+    if max_per_hour <= 0:
+        return 0.0
+    recent = [t for t in timestamps if now - t < window_s]
+    if len(recent) < max_per_hour:
+        return 0.0
+    return max(0.0, window_s - (now - min(recent)))
 
 
 # detect_abort(): ordered checks against the design §8.3 abort-reason list.

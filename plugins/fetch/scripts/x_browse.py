@@ -51,6 +51,21 @@ def scroll():
     return _run("scroll")
 
 
+def viewport_height() -> int:
+    """Current viewport height in px (fallback 900 if the page won't answer)."""
+    out = js("window.innerHeight")
+    try:
+        return int(float(out))
+    except (ValueError, TypeError):
+        return 900
+
+
+def scroll_by(pixels: int):
+    """Scroll a specific pixel distance (signed; negative = up). Lets the loop
+    vary scroll distance per action instead of a fixed page jump."""
+    return _run("js", f"window.scrollBy(0, {int(pixels)})")
+
+
 def js(expr: str) -> str:
     """Evaluate a JS expression in the page and return its stdout."""
     out, _, _ = _run("js", expr)
