@@ -23,13 +23,14 @@ def should_stop_incremental(seen_ids, known, pinned_id=None):
     return False
 
 
-def next_window(prev_start, prev_result_count, overflow_at, span_days=DEFAULT_SPAN_DAYS):
-    """Adapt the enumeration window: halve span on overflow, widen when sparse."""
+def next_window(prev_result_count, overflow_at, span_days=DEFAULT_SPAN_DAYS) -> int:
+    """Decide the next enumeration window span (days): halve span on overflow,
+    widen when sparse. Date arithmetic is the driver's responsibility."""
     if prev_result_count >= overflow_at:
-        return max(1, span_days // 2), prev_result_count
+        return max(1, span_days // 2)
     if prev_result_count < overflow_at // 10:
-        return span_days * 2, prev_result_count
-    return span_days, prev_result_count
+        return span_days * 2
+    return span_days
 
 
 async def enumerate_account(page, handle, state, strategy):

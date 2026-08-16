@@ -22,9 +22,7 @@ def test_pinned_excluded_but_two_real_known_still_stops():
     assert should_stop_incremental([PIN, C, B], {PIN, C, B}, pinned_id=PIN) is True
 
 def test_window_halves_on_overflow():
-    span, _ = next_window(prev_start="2026-01-01", prev_result_count=100, overflow_at=100)
-    assert span == 15  # 30 -> 15
+    assert next_window(prev_result_count=100, overflow_at=100) == 15  # 30 -> 15
 
 def test_window_widens_when_sparse():
-    span, _ = next_window(prev_start="2026-01-01", prev_result_count=2, overflow_at=100)
-    assert span == 60  # 30 -> 60
+    assert next_window(prev_result_count=2, overflow_at=100) == 60  # 30 -> 60

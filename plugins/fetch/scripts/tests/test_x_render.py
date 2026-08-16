@@ -53,6 +53,23 @@ def test_render_thread_numbers_sections():
     })
     assert "## 1." in md and "## 2." in md
 
+def test_render_note_escapes_author_name_in_frontmatter():
+    from x_render import render_note
+    md = render_note({
+        "status_id": "1", "handle": "h", "author_name": 'Jyotish: Vedic Astro "AI"',
+        "date": "2026-01-01", "date_captured": "2026-08-16",
+        "post_type": "post", "metrics": {"likes": 0, "reposts": 0, "views": 0},
+        "media": 0, "content": "text", "image_files": [],
+    })
+    assert 'author_name: "Jyotish: Vedic Astro \\"AI\\""' in md
+    frontmatter = md.split("---")[1]
+    try:
+        import yaml
+        parsed = yaml.safe_load(frontmatter)
+        assert parsed["author_name"] == 'Jyotish: Vedic Astro "AI"'
+    except ImportError:
+        pass
+
 def test_render_note_engagement_line_formatted_with_separator():
     from x_render import render_note
     md = render_note({

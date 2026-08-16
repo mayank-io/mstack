@@ -5,6 +5,11 @@ _FORBIDDEN = re.compile(r'[/\\:"?*<>|]')
 _WS = re.compile(r'\s+')
 
 
+def _yaml_quote(s: str) -> str:
+    """Render s as a YAML-safe double-quoted scalar (escapes backslashes and quotes)."""
+    return '"' + str(s).replace('\\', '\\\\').replace('"', '\\"') + '"'
+
+
 def _fmt_count(n: int) -> str:
     """Format a count with thousands separators and K/M abbreviation.
     Rules:
@@ -78,7 +83,7 @@ def render_note(post: dict) -> str:
         "  - x-post",
         f"source: https://x.com/{handle}/status/{status_id}",
         f'author: "@{handle}"',
-        f"author_name: {post['author_name']}",
+        f"author_name: {_yaml_quote(post['author_name'])}",
         f"date: {post['date']}",
         f"date_captured: {post['date_captured']}",
         f'status_id: "{status_id}"',
