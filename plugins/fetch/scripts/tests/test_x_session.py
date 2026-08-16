@@ -67,3 +67,19 @@ def test_detect_abort_challenge():
 def test_detect_abort_none_on_normal_page():
     from x_session import detect_abort
     assert detect_abort("Just some tweets here", "https://x.com/vedanjanam") is None
+
+
+def test_backoff_capped_at_three():
+    from x_session import backoff_delays
+    assert len(backoff_delays(attempts=3, seed=1)) == 3
+
+def test_backoff_is_increasing_in_expectation():
+    from x_session import backoff_delays
+    d = backoff_delays(attempts=3, seed=1)
+    assert d[0] <= d[2]  # exponential base grows
+
+def test_challenge_reasons_are_not_retryable():
+    from x_session import is_challenge
+    assert is_challenge("login_wall") is True
+    assert is_challenge("interstitial") is True
+    assert is_challenge("rate_limited") is False  # a throttle, backoff is fine

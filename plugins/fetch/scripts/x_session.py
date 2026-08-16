@@ -141,3 +141,41 @@ def detect_abort(page_text: str, url: str) -> str | None:
         return "locked"
 
     return None
+
+
+# backoff_delays(): exponential backoff with full jitter (design §8.3), used
+# when detect_abort() returns "rate_limited" — a throttle, not a hard
+# challenge, so retrying after a randomized delay is safe.
+_BACKOFF_BASE_SECONDS = 1.0
+_BACKOFF_MAX_ATTEMPTS = 3
+
+
+def backoff_delays(attempts: int, seed: int) -> list[float]:
+    """Exponential-with-full-jitter backoff delays, capped at 3 entries.
+
+    Args:
+        attempts: number of delays requested (capped at 3).
+        seed: seeds a private `random.Random` instance — deterministic,
+            never the global `random` module or a time/urandom source.
+
+    Returns:
+        A list of up to 3 delays in seconds. Entry i is drawn uniformly
+        from [0, base * 2**i), so delays increase in expectation even
+        though any single draw may not exceed the previous one.
+    """
+    rng = random.Random(seed)
+    n = min(max(attempts, 0), _BACKOFF_MAX_ATTEMPTS)
+    return [rng.uniform(0, _BACKOFF_BASE_SECONDS * (2 ** i)) for i in range(n)]
+
+
+# is_challenge(): the non-retryable subset of detect_abort()'s reasons
+# (design §8.3). "rate_limited" is deliberately excluded — it's a throttle
+# that backoff_delays() + retry can recover from. Retrying through any of
+# these four escalates a soft limit into a lock, so the harvester must
+# checkpoint and hard-stop instead.
+_CHALLENGE_REASONS = {"login_wall", "interstitial", "challenge", "locked"}
+
+
+def is_challenge(abort_reason: str) -> bool:
+    """True if `abort_reason` (a detect_abort() return value) is non-retryable."""
+    return abort_reason in _CHALLENGE_REASONS
