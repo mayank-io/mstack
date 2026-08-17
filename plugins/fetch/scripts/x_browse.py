@@ -27,10 +27,31 @@ def _run(*args, timeout=60):
     return proc.stdout.strip(), proc.stderr.strip(), proc.returncode
 
 
+def status_mode() -> str:
+    """The browse server's mode string, lowercased (e.g. 'headed', 'launched',
+    'headless'). Empty string if it can't be read."""
+    out, _, _ = _run("status")
+    for line in out.splitlines():
+        if line.lower().startswith("mode:"):
+            return line.split(":", 1)[1].strip().lower()
+    return ""
+
+
+def is_headed() -> bool:
+    """True only if the browser is running in a real, visible headed window.
+
+    Enforced invariant: this project never drives X headless — headless Chrome
+    is far more fingerprintable (SwiftShader GPU, navigator.webdriver, odd
+    window dims). The server can silently drift to a non-headed mode, so the
+    loop checks this before every run rather than trusting connect-time state.
+    """
+    return status_mode() == "headed"
+
+
 def status_ok() -> bool:
-    """True if the browse server is healthy and headed."""
+    """True if the browse server is healthy AND headed."""
     out, _, rc = _run("status")
-    return rc == 0 and "healthy" in out.lower()
+    return rc == 0 and "healthy" in out.lower() and is_headed()
 
 
 def goto(url: str):

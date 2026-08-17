@@ -81,6 +81,16 @@ def governed_pilot(
     if max_ticks is None:
         max_ticks = max_posts * 6
 
+    # Hard gate: never operate headless. Refuse before any browsing if the
+    # session isn't a real visible headed window (design §8.2). Checked every
+    # run because the browse server can silently drift out of headed mode.
+    if not browser.is_headed():
+        return {
+            "outcome": "aborted", "stage": "headed_check", "reason": "not_headed",
+            "hard_stop": True, "collected": [],
+            "detail": "browser is not in headed mode; reconnect with `browse connect`",
+        }
+
     pacer = Pacer(seed, config)
     state = ArchiveState(os.path.join(target_dir, handle))
     budget = Budget(state, day, config.get("daily_render_budget", 5500))

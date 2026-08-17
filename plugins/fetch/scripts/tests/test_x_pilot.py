@@ -39,12 +39,15 @@ class FakeBrowser:
     """probe_pages: (url, text) returned on successive detect_abort probes
     (one probe == one page_text()+current_url() pair). Holds the last page
     once the script is exhausted. id_batches: status ids per collect call."""
-    def __init__(self, probe_pages, id_batches):
+    def __init__(self, probe_pages, id_batches, headed=True):
         self._pages = list(probe_pages)
         self._id_batches = list(id_batches)
         self._last = NORMAL
+        self._headed = headed
         self.gotos = []
         self.scroll_calls = []
+    def is_headed(self):
+        return self._headed
     def page_text(self):
         if self._pages:
             self._last = self._pages.pop(0)
@@ -70,6 +73,15 @@ def _run(probe_pages, id_batches, tmp_path, **kw):
     )
     return result, fb, clk
 
+
+def test_non_headed_browser_refuses_to_run(tmp_path):
+    clk = FakeClock()
+    fb = FakeBrowser([NORMAL], [["100"]], headed=False)
+    result = governed_pilot("vedanjanam", str(tmp_path), "2026-08-17", CFG,
+                            browser=fb, clock=clk.now, sleep=clk.sleep, max_posts=5)
+    assert result["outcome"] == "aborted" and result["reason"] == "not_headed"
+    assert result["hard_stop"] is True
+    assert fb.gotos == [] and clk.dwells == []       # never browsed, never dwelled
 
 def test_login_wall_aborts_at_preflight(tmp_path):
     result, fb, clk = _run([("https://x.com/i/flow/login", "sign in")], [], tmp_path)
