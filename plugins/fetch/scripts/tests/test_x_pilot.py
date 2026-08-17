@@ -101,8 +101,9 @@ def test_rate_limit_gives_up_after_retries(tmp_path):
     assert result["events"]["backoffs"] >= 3          # tried 3 backoffs
 
 def test_session_break_fires_after_time_cap(tmp_path):
-    # tiny session cap: one read_dwell (~17s) already exceeds it -> break on tick 1
-    cfg = dict(CFG, max_session_minutes=0.2)
+    # tiny active window: one read_dwell (~17s) already exceeds 0.1 min (6s)
+    # -> break on tick 1
+    cfg = dict(CFG, session_active_range=[0.1, 0.1])
     clk = FakeClock(); fb = FakeBrowser([NORMAL] * 8, [["1"], ["2"]])
     result = governed_pilot("vedanjanam", str(tmp_path), "2026-08-16", cfg,
                             browser=fb, clock=clk.now, sleep=clk.sleep,

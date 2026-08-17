@@ -24,6 +24,16 @@ def test_should_break_true_past_limit():
     assert p.should_break(41) is True
     assert p.should_break(39) is False
 
+def test_active_limit_within_12_to_17_min():
+    p = Pacer(seed=1, config=CFG)
+    vals = [p.active_limit_minutes() for _ in range(1000)]
+    assert all(12 <= v <= 17 for v in vals)
+    assert min(vals) < max(vals)          # genuinely randomized, not constant
+
+def test_active_limit_defaults_when_key_absent():
+    p = Pacer(seed=1, config={})
+    assert 12 <= p.active_limit_minutes() <= 17
+
 def test_should_backtrack_is_occasional():
     p = Pacer(seed=1, config=CFG)
     hits = sum(p.should_backtrack() for _ in range(10000))

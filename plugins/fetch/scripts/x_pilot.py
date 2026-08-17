@@ -73,6 +73,7 @@ def governed_pilot(
     render_ts = []            # clock() timestamp per rendered post (rate ceiling)
     events = {"breaks": 0, "throttle_waits": 0, "backoffs": 0, "backtracks": 0}
     last_break_at = clock()
+    active_limit = pacer.active_limit_minutes()   # break after 12-17 min, redrawn each cycle
 
     def _probe(stage):
         reason = detect_abort(browser.page_text(), browser.current_url())
@@ -149,11 +150,13 @@ def governed_pilot(
             if not recovered:
                 return _result("throttled", seen, ticks, ab)
 
-        # 5. session break: long idle every max_session_minutes of activity
+        # 5. session break: long idle once the randomized active window (12-17
+        #    min, redrawn each cycle) elapses
         minutes_active = (clock() - last_break_at) / 60.0
-        if pacer.should_break(minutes_active):
+        if minutes_active > active_limit:
             events["breaks"] += 1
             sleep(pacer.session_break_seconds())
             last_break_at = clock()
+            active_limit = pacer.active_limit_minutes()
 
     return _result("ok", seen, ticks, {"hit_cap": len(seen) >= max_posts})

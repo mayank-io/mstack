@@ -33,6 +33,7 @@ _DEFAULT_SCROLL_DWELL = (2.5, 7.0)
 _DEFAULT_READ_DWELL = (8.0, 35.0)
 _DEFAULT_MAX_SESSION_MINUTES = 40
 _DEFAULT_SESSION_BREAK = (600.0, 1800.0)  # 10-30 min idle break
+_DEFAULT_SESSION_ACTIVE = (12.0, 17.0)    # break after 12-17 min of activity
 
 # should_backtrack(): probability of a short re-read scroll-up per tick.
 _BACKTRACK_PROB = 1.0 / 12.0
@@ -82,9 +83,17 @@ class Pacer:
 
     def session_break_seconds(self) -> float:
         """A randomized long idle break, within config['session_break_range']
-        (default 10-30 min). Called when should_break() fires so the session
-        has human-shaped rest gaps, not just per-action jitter (design §8.2)."""
+        (default 10-30 min). Called when the active window elapses so the
+        session has human-shaped rest gaps, not just per-action jitter (§8.2)."""
         lo, hi = self._config.get("session_break_range", _DEFAULT_SESSION_BREAK)
+        return self._rng.uniform(lo, hi)
+
+    def active_limit_minutes(self) -> float:
+        """A fresh randomized active-window length (minutes) drawn per cycle
+        from config['session_active_range'] (default 12-17 min). Redrawing it
+        after every break varies session length instead of a fixed cadence,
+        which is itself more human than breaking on the exact same clock."""
+        lo, hi = self._config.get("session_active_range", _DEFAULT_SESSION_ACTIVE)
         return self._rng.uniform(lo, hi)
 
     def should_backtrack(self) -> bool:
