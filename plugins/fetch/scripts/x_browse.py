@@ -72,13 +72,17 @@ def js(expr: str) -> str:
     return out
 
 
-# JS that collects the status IDs of every article currently in the DOM,
-# using the timestamp permalink (which points at the article's OWN id).
-# Virtualization-safe ONLY because the caller runs it every scroll tick and
-# unions the results — a single end-of-scroll call would miss recycled nodes.
+# JS that collects the status IDs of every article currently in the DOM.
+# The article's OWN id is the timestamp permalink when present; X does not
+# always render a <time> element (observed 2026-08: zero <time> on a profile
+# timeline), so it falls back to the FIRST status link in DOM order — the
+# header permalink precedes any embedded quote/reply card, which carries a
+# different handle's id. Virtualization-safe ONLY because the caller runs it
+# every scroll tick and unions the results.
 COLLECT_IDS_JS = (
     "JSON.stringify(Array.from(document.querySelectorAll('article'))"
-    ".map(a=>{const t=a.querySelector('time');const l=t&&t.closest('a[href*=\"/status/\"]');"
+    ".map(a=>{const links=Array.from(a.querySelectorAll('a[href*=\"/status/\"]'));"
+    "let l=links.find(x=>x.querySelector('time'))||links[0];"
     "const m=l&&l.getAttribute('href').match(/\\/status\\/(\\d+)/);return m?m[1]:null;})"
     ".filter(Boolean))"
 )
