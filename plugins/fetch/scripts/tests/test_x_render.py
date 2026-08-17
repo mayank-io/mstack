@@ -51,7 +51,8 @@ def test_render_thread_numbers_sections():
         "sections": [{"content": "first"}, {"content": "second"}],
         "image_files": [],
     })
-    assert "## 1." in md and "## 2." in md
+    assert "**1/2** first" in md and "**2/2** second" in md
+    assert "## 1." not in md and "## 2." not in md   # no empty numbered headers
 
 def test_render_note_escapes_author_name_in_frontmatter():
     from x_render import render_note

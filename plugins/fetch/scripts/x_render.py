@@ -104,10 +104,11 @@ def render_note(post: dict) -> str:
     lines += [f"# {_derive_title(post)}", ""]
 
     if post_type == "thread":
-        for i, section in enumerate(post.get("sections", []), start=1):
-            lines.append(f"## {i}.")
-            lines.append("")
-            lines.append(section["content"])
+        sections = post.get("sections", [])
+        n = len(sections)
+        for i, section in enumerate(sections, start=1):
+            # inline n/N marker (how threads read on X); no empty ## headers
+            lines.append(f"**{i}/{n}** {section['content']}".rstrip())
             lines += _image_lines(section.get("image_files"))
             lines.append("")
     else:
