@@ -139,6 +139,27 @@ def test_budget_charged_deduped_capped_and_persisted(tmp_path):
     st = ArchiveState(os.path.join(str(tmp_path), "vedanjanam"))
     assert st.rendered_today("2026-08-16") == 3        # persisted to disk
 
+def test_enumeration_is_persisted_to_manifest_and_posts(tmp_path):
+    from x_state import ArchiveState
+    # real-looking snowflake ids so the derived date is meaningful
+    ids = ["2089349152014524658", "2005986370855330186"]
+    result, fb, clk = _run([NORMAL] * 8, [ids], tmp_path, max_posts=2, max_ticks=4)
+    assert result["outcome"] == "ok"
+    st = ArchiveState(os.path.join(str(tmp_path), "vedanjanam"))
+    # posts.jsonl: one durable record per enumerated post
+    posts = st.read_posts()
+    assert [p["status_id"] for p in posts] == ids
+    rec = posts[0]
+    assert rec["url"] == "https://x.com/vedanjanam/status/2089349152014524658"
+    assert rec["status"] == "enumerated"
+    assert rec["date"].startswith("2026-")          # derived from the snowflake id
+    # manifest.json: run-level summary
+    man = st.read_manifest()
+    assert man["handle"] == "vedanjanam"
+    assert man["post_count"] == 2
+    assert man["enumeration_complete"] is False
+    assert man["format_version"] == 1                # injected by ArchiveState
+
 def test_backtrack_occurs_over_many_ticks(tmp_path):
     # enough ticks that the ~1/12 backtrack probability should fire at least once
     result, fb, clk = _run([NORMAL] * 60, [[str(i)] for i in range(60)], tmp_path,

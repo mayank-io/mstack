@@ -25,12 +25,28 @@ Talks to the browser only through the injected `browser` adapter and the
 injected `clock`/`sleep`, so the whole control flow is unit-testable with a
 fake browser and a fake clock — no live X.
 """
+import datetime
 import os
 
 from x_session import (
     Pacer, Budget, detect_abort, is_challenge, backoff_delays, throttle_delay,
 )
+from x_snowflake import timestamp_ms
 from x_state import ArchiveState
+
+
+def _post_record(handle, status_id):
+    """Durable enumeration record for one post. `date` is derived from the
+    Snowflake id (deterministic — no clock read), not scraped."""
+    ms = timestamp_ms(status_id)
+    date = datetime.datetime.fromtimestamp(
+        ms / 1000, datetime.timezone.utc).strftime("%Y-%m-%d")
+    return {
+        "status_id": status_id,
+        "date": date,
+        "url": f"https://x.com/{handle}/status/{status_id}",
+        "status": "enumerated",   # ids captured; text/media extraction is a later phase
+    }
 
 
 def governed_pilot(
@@ -82,6 +98,15 @@ def governed_pilot(
         return {"stage": stage, "reason": reason, "hard_stop": is_challenge(reason)}
 
     def _result(outcome, seen, ticks, extra=None):
+        state.write_manifest({
+            "handle": handle,
+            "enumeration_strategy": "timeline-pilot",
+            "enumeration_complete": False,   # capped pilot, not a full archive
+            "day": day,
+            "outcome": outcome,
+            "post_count": len(seen),
+            "collected": sorted(seen),
+        })
         r = {
             "outcome": outcome,
             "collected": sorted(seen),
@@ -114,6 +139,7 @@ def governed_pilot(
                 seen.add(sid)
                 budget.charge(1)
                 render_ts.append(clock())
+                state.append_post(_post_record(handle, sid))   # durable, incremental
 
         # 2. volume ceiling: sleep if we'd exceed renders/hour
         wait = throttle_delay(render_ts, clock(), max_per_hour)
