@@ -107,6 +107,36 @@ def extract_thread_here(page, handle, focal_id, scrolls=6):
     return {"root_id": root_id, "is_thread": len(posts) > 1, "posts": posts}
 
 
+def find_article(page, status_id):
+    """Return the timeline <article> element handle for status_id, or None."""
+    for h in page.query_selector_all("article"):
+        try:
+            sid = page.evaluate("(a) => (window.__xExtract ? window.__xExtract.statusIdOf(a) : '')", h)
+        except Exception:
+            sid = ""
+        if sid == status_id:
+            return h
+    return None
+
+
+def open_post_in_new_tab(context, page, status_id, modifier="Meta"):
+    """Human-style: Cmd/Ctrl+Click the post so it opens in a NEW TAB. Returns
+    the new Playwright page (caller extracts, then closes it), or None. The
+    original profile tab keeps its scroll position."""
+    art = find_article(page, status_id)
+    if not art:
+        return None
+    art.scroll_into_view_if_needed()
+    time.sleep(0.3)
+    target = art.query_selector('[data-testid="tweetText"]') or \
+        art.query_selector('a[href*="/status/"]') or art
+    with context.expect_page() as ev:
+        target.click(modifiers=[modifier])
+    tab = ev.value
+    tab.wait_for_selector("article", timeout=15000)
+    return tab
+
+
 def click_into_post(page, status_id):
     """Human-style: click the timeline article for status_id to open it.
     Returns True on success. No page.goto — a real user clicks."""
