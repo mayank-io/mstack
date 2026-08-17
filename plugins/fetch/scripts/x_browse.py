@@ -37,15 +37,42 @@ def status_mode() -> str:
     return ""
 
 
-def is_headed() -> bool:
-    """True only if the browser is running in a real, visible headed window.
+# A software WebGL renderer means no real GPU == headless. The GStack status
+# "Mode" string is NOT reliable (observed reporting 'headed' while the actual
+# process was chrome-headless-shell), so the GPU is the source of truth.
+_SOFTWARE_RENDERERS = ("swiftshader", "llvmpipe", "software renderer", "mesa offscreen")
 
-    Enforced invariant: this project never drives X headless — headless Chrome
-    is far more fingerprintable (SwiftShader GPU, navigator.webdriver, odd
-    window dims). The server can silently drift to a non-headed mode, so the
-    loop checks this before every run rather than trusting connect-time state.
+_WEBGL_RENDERER_JS = (
+    "(function(){try{const gl=document.createElement('canvas').getContext('webgl');"
+    "const d=gl&&gl.getExtension('WEBGL_debug_renderer_info');"
+    "return d?gl.getParameter(d.UNMASKED_RENDERER_WEBGL):'';}catch(e){return '';}})()"
+)
+
+
+def _is_software_renderer(renderer: str) -> bool:
+    r = (renderer or "").lower()
+    return any(s in r for s in _SOFTWARE_RENDERERS)
+
+
+def webgl_renderer() -> str:
+    """The page's unmasked WebGL renderer string (real GPU vs software)."""
+    return js(_WEBGL_RENDERER_JS)
+
+
+def is_headed() -> bool:
+    """True only if the browser is a real, visible headed window on a real GPU.
+
+    Enforced invariant: never drive X headless (headless is far more
+    fingerprintable). Checked before every run because the browse server
+    silently drifts, and — critically — because its status 'Mode: headed'
+    can lie while chrome-headless-shell is what's actually running. The GPU
+    is the tiebreaker: a software renderer (SwiftShader/llvmpipe) == headless.
+    Conservative: unreadable GPU also fails (refuse when uncertain).
     """
-    return status_mode() == "headed"
+    if status_mode() != "headed":
+        return False
+    renderer = webgl_renderer()
+    return bool(renderer) and not _is_software_renderer(renderer)
 
 
 def status_ok() -> bool:
