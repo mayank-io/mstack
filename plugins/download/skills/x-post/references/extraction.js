@@ -47,20 +47,29 @@
     return metrics;
   }
 
-  // Step 2 — extract the focal (first) article on the current page.
-  function extractFocal() {
-    const article = document.querySelector('article');
-    if (!article) return { error: 'No article found' };
-
-    let handle = '', displayName = '';
+  // Extract one <article> node's full data (author, text, time, metrics, images).
+  function extractArticle(article) {
+    let handle = '';
     for (const link of article.querySelectorAll('a[role="link"]')) {
       const href = link.getAttribute('href');
-      if (href && href.match(/^\/[^\/]+$/) && !href.includes('/status/')) {
-        handle = href.slice(1);
-        displayName = (link.textContent && link.textContent.split('@')[0].trim()) || handle;
-        break;
+      if (href && href.match(/^\/[^\/]+$/) && !href.includes('/status/')) { handle = href.slice(1); break; }
+    }
+    // Display name: the first author link is often the avatar (empty text),
+    // so prefer the User-Name testid's first line; then any non-empty author
+    // link that isn't the @handle; finally fall back to the handle.
+    let displayName = '';
+    const un = article.querySelector('[data-testid="User-Name"]');
+    if (un) { const first = (un.innerText || '').split('\n')[0].trim(); if (first && first[0] !== '@') displayName = first; }
+    if (!displayName) {
+      for (const link of article.querySelectorAll('a[role="link"]')) {
+        const href = link.getAttribute('href');
+        const txt = (link.textContent || '').trim();
+        if (href && href.match(/^\/[^\/]+$/) && !href.includes('/status/') && txt && txt[0] !== '@') {
+          displayName = txt.split('@')[0].trim(); break;
+        }
       }
     }
+    if (!displayName) displayName = handle;
 
     const tweetText = article.querySelector('[data-testid="tweetText"]');
     const content = (tweetText && tweetText.innerText) || '';
@@ -76,8 +85,31 @@
       .filter((img) => img.src && img.src.includes('pbs.twimg.com/media'))
       .map((img) => img.src.replace(/name=\w+/, 'name=large'));
 
-    return { handle, displayName, content, timestamp, metrics,
+    return { statusId: statusIdOf(article), handle, displayName, content, timestamp, metrics,
              expectedImageCount: photoLinks.length, images };
+  }
+
+  // Step 2 — extract the focal (first) article on the current page.
+  function extractFocal() {
+    const article = document.querySelector('article');
+    if (!article) return { error: 'No article found' };
+    return extractArticle(article);
+  }
+
+  // Extract EVERY same-author article on the current conversation page, with
+  // full content — used by click-into-post navigation so a whole thread is
+  // captured from one page (no per-post URL navigation, which looks robotic).
+  function extractAllByAuthor(handle) {
+    const out = []; const seen = new Set();
+    for (const article of document.querySelectorAll('article')) {
+      if (handleOf(article).toLowerCase() !== handle.toLowerCase()) continue;
+      const d = extractArticle(article);
+      const isReplyToOther = /(^|\n)Replying to/.test(article.innerText || '');
+      if (d.statusId && !seen.has(d.statusId)) { seen.add(d.statusId); out.push({ ...d, isReplyToOther }); }
+    }
+    out.sort((a, b) => a.statusId.length - b.statusId.length ||
+      (a.statusId < b.statusId ? -1 : a.statusId > b.statusId ? 1 : 0));
+    return out;
   }
 
   // Step 2.5 — walk backward to the thread root (ancestors render ABOVE focal).
@@ -116,5 +148,6 @@
     return posts;
   }
 
-  window.__xExtract = { extractFocal, findRoot, detectThreadMembers, statusIdOf, handleOf };
+  window.__xExtract = { extractFocal, extractArticle, extractAllByAuthor,
+                        findRoot, detectThreadMembers, statusIdOf, handleOf };
 })();

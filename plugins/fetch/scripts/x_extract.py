@@ -79,6 +79,52 @@ def detect_thread_members(page, handle, root_id, scrolls=10):
     return [root_id]
 
 
+def extract_thread_here(page, handle, focal_id, scrolls=6):
+    """Extract the whole thread from the CONVERSATION PAGE we are already on
+    (after a human click-in), via the shared extractAllByAuthor — no per-post
+    URL navigation. Returns {root_id, is_thread, posts:[normalized, chrono]}."""
+    _ensure(page)
+    root_id = find_root(page, focal_id, handle)
+    for _ in range(scrolls):
+        page.evaluate("window.scrollBy(0, window.innerHeight)")
+        time.sleep(0.8)
+    _ensure(page)
+    allposts = page.evaluate("h => window.__xExtract.extractAllByAuthor(h)", handle) or []
+    by_id = {p["statusId"]: p for p in allposts}
+    recs = [{"status_id": p["statusId"], "is_reply_to_other": bool(p.get("isReplyToOther"))}
+            for p in allposts]
+    if root_id not in by_id:
+        recs.append({"status_id": root_id, "is_reply_to_other": False})
+    member_ids = [root_id]
+    for grp in cluster(recs):
+        if root_id in grp:
+            member_ids = sorted(grp, key=id_sort_key)
+            break
+    posts = [_normalize(by_id[sid], handle, sid) for sid in member_ids
+             if by_id.get(sid) and (by_id[sid].get("content") or "").strip()]
+    if not posts and by_id.get(root_id):
+        posts = [_normalize(by_id[root_id], handle, root_id)]
+    return {"root_id": root_id, "is_thread": len(posts) > 1, "posts": posts}
+
+
+def click_into_post(page, status_id):
+    """Human-style: click the timeline article for status_id to open it.
+    Returns True on success. No page.goto — a real user clicks."""
+    for h in page.query_selector_all("article"):
+        try:
+            sid = page.evaluate("(a) => (window.__xExtract ? window.__xExtract.statusIdOf(a) : '')", h)
+        except Exception:
+            sid = ""
+        if sid == status_id:
+            h.scroll_into_view_if_needed()
+            time.sleep(0.4)
+            # click the post's text if present, else the article body
+            target = h.query_selector('[data-testid="tweetText"]') or h
+            target.click()
+            return True
+    return False
+
+
 def extract_thread(page, handle, focal_id):
     """Walk to the root, detect members, extract each. Returns
     {root_id, is_thread, posts:[normalized dicts, chronological]}."""
