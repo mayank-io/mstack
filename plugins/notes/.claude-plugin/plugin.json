@@ -1,0 +1,23 @@
+{
+  "name": "notes",
+  "description": "Capture external sources into a notes vault. The clip skill routes any URL to the right extractor and note-writer, so you type one thing regardless of source.",
+  "author": {
+    "name": "Mayank"
+  },
+  "license": "MIT",
+  "keywords": [
+    "notes",
+    "clip",
+    "clipping",
+    "obsidian",
+    "capture",
+    "routing",
+    "youtube",
+    "x",
+    "twitter",
+    "linkedin",
+    "notion",
+    "pdf",
+    "article"
+  ]
+}
