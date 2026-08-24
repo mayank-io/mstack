@@ -23,13 +23,13 @@ clip https://youtube.com/watch?v=abc
 | X / Twitter | `x-to-obsidian:save` | yes |
 | YouTube | `youtube-to-obsidian:process` | yes |
 | LinkedIn | `linkedin-to-obsidian:save` | yes |
-| Notion site | `download:notion-public-site` | extract only |
-| Scribd | `download:scribd-document` | extract only |
-| arXiv / alphaXiv | `download:alphaxiv-paper` | extract only |
+| Notion site | `fetch:notion-public-site` | extract only |
+| Scribd | `fetch:scribd-document` | extract only |
+| arXiv / alphaXiv | `fetch:alphaxiv-paper` | extract only |
 | PDF (incl. Drive) | `curl` + Read | extract only |
 | anything else | `obsidian:defuddle` | extract only |
 
-Extract-only routes are followed by `obsidian-note-creator:create` to write the note.
+Extract-only routes are followed by `notes:create` to write the note.
 
 ## Design
 
@@ -46,6 +46,6 @@ What the router *does* own is the set of source-specific traps that have produce
 
 ## Dependencies
 
-The vault-writing routes live in the `mk-claude-code-plugins` marketplace (`x-to-obsidian`, `youtube-to-obsidian`, `linkedin-to-obsidian`, `obsidian-note-creator`). Extraction routes live in this marketplace's `download` plugin, plus `obsidian:defuddle`.
+Note-writing lives in this plugin (`notes:create`, `notes:save-local-file`). Source-specific formatters live in the `mk-claude-code-plugins` marketplace (`x-to-obsidian`, `youtube-to-obsidian`, `linkedin-to-obsidian`); extraction lives in this marketplace's `fetch` plugin, plus `obsidian:defuddle`.
 
 If a required skill is missing the clip skill reports it and stops, rather than half-finishing.

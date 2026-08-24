@@ -6,7 +6,7 @@
   },
   "metadata": {
     "description": "Mayank's stack of Claude Code plugins for development and continuous improvement workflows",
-    "version": "0.5.0",
+    "version": "0.6.0",
     "pluginRoot": "./plugins"
   },
   "plugins": [
@@ -47,9 +47,9 @@
       "category": "development"
     },
     {
-      "name": "download",
-      "source": "./plugins/download",
-      "description": "Download content from various sources (YouTube, X, Notion, Scribd, arXiv, blogs) as local Markdown files, and digitize Vedic astrology charts to JSON + ASCII",
+      "name": "fetch",
+      "source": "./plugins/fetch",
+      "description": "Fetch content from a source into a directory — YouTube, X, Notion, Scribd, arXiv, blogs — plus Vedic chart digitisation. Output location is a parameter; nothing here knows about vaults.",
       "author": {
         "name": "Mayank"
       },

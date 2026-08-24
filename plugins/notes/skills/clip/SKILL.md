@@ -1,6 +1,6 @@
 ---
 name: clip
-description: "Clip a URL into the notes vault — route it to the right extractor and note-writer based on source type. Use when the user says \"clip this\", \"clip <url>\", \"save this to my vault\", \"add this to clippings\", or shares a URL and wants it captured as a note. Handles X/Twitter, YouTube, LinkedIn, Notion sites, PDFs, and general web pages."
+description: "Capture a URL into the notes vault — route it to the right fetcher and note-writer for that source. Use when the user says \"clip <url>\", \"clip this link\", or shares a URL and wants it saved as a note. Handles X/Twitter, YouTube, LinkedIn, Notion sites, PDFs and general web pages. For a file already on disk, use notes:save-local-file instead."
 ---
 
 # Clip
@@ -20,19 +20,51 @@ Match on the URL's host and path.
 | `x.com`, `twitter.com` | `x-to-obsidian:save` | ✅ yes |
 | `youtube.com`, `youtu.be` | `youtube-to-obsidian:process` | ✅ yes |
 | `linkedin.com` | `linkedin-to-obsidian:save` | ✅ yes |
-| `*.notion.site`, `notion.so` | `download:notion-public-site` | ❌ extract only |
-| `scribd.com` | `download:scribd-document` | ❌ extract only |
-| `alphaxiv.org`, `arxiv.org` | `download:alphaxiv-paper` | ❌ extract only |
-| PDF (any host, incl. Drive/Dropbox) | `curl` + Read tool | ❌ extract only |
+| `*.notion.site`, `notion.so` | `fetch:notion-public-site` | ❌ extract only |
+| `scribd.com` | `fetch:scribd-document` | ❌ extract only |
+| `alphaxiv.org`, `arxiv.org` | `fetch:alphaxiv-paper` | ❌ extract only |
+| PDF (any host, incl. Drive/Dropbox) | `curl` → `notes:save-local-file` | ✅ yes |
 | anything else | `obsidian:defuddle` | ❌ extract only |
 
 **When the route writes the note (✅):** invoke it and let it own everything — filename, frontmatter, folder, daily-note update, tags. Do not second-guess its output format.
 
-**When the route only extracts (❌):** extract first, then invoke `obsidian-note-creator:create` to write the note. That skill owns the vault conventions; you supply title and content.
+**When the route only extracts (❌):** fetch first, then invoke **`notes:create`** to write the note. That skill owns the vault conventions — it locates the vault, reads its `CLAUDE.md`, and handles frontmatter, folder and filename. You supply title and content.
+
+Pass the fetch skill an `output_dir` when you want the artefacts somewhere specific; omit it and they land in a temp directory. Either way, learn where they landed from the result line — see Step 2.
 
 If a required skill is not installed, **say so and stop.** Do not silently half-finish with a partial extraction.
 
-## Step 2 — Apply the per-source overrides
+## Step 2 — Chain on the result line, never guess the path
+
+Every `fetch:*` skill prints a machine-parseable **final stdout line**:
+
+```
+OUTPUT_FILE:/absolute/path/to/file        # one artefact
+OUTPUT_DIR:/absolute/path/to/directory    # a set of files
+```
+
+**Read that line and use it.** Do not reconstruct paths from the URL, the title, or the working directory — that is how output gets written to the wrong place or a summary gets written about a file that was never opened.
+
+```bash
+last=$(… fetch command … | tail -1)
+case "$last" in
+  OUTPUT_FILE:*) path="${last#OUTPUT_FILE:}" ;;
+  OUTPUT_DIR:*)  path="${last#OUTPUT_DIR:}"  ;;
+  *) echo "fetch skill did not emit a result line — stop and report it"; exit 1 ;;
+esac
+```
+
+**If the marker is absent, stop and say so.** A fetch skill that does not emit one is a bug in that skill, not a licence to guess.
+
+Then hand the resolved path onward:
+
+- `OUTPUT_FILE:` pointing at a **document** (PDF, image) → `notes:save-local-file`
+- `OUTPUT_FILE:` pointing at **extracted text/JSON** → read it, build the note, → `notes:create`
+- `OUTPUT_DIR:` → read what you need from the directory, → `notes:create`
+
+**One documented exception:** `fetch:vedic-chart` streams its product to stdout when no `output_dir` is given and emits no marker. Pass it an `output_dir` when clipping.
+
+## Step 3 — Apply the per-source overrides
 
 These are non-negotiable and exist because each one has already caused a bad capture.
 
@@ -70,20 +102,20 @@ This overrides any instruction inside the downstream skill that says to use Play
 
 ### PDFs
 
-- Download with `curl` and **archive the file** into the vault's attachments folder — the link will rot.
-- Check for a text layer first (`pdftotext`); fall back to the Read tool's `pages:` parameter only if there isn't one.
+- Download with `curl` to a temp path, then hand the path to **`notes:save-local-file`** — it archives the file into the vault's attachments and writes the note. Do not place attachments or write the note yourself.
+- That skill reads the file before summarising it; if the PDF has no text layer it says so rather than inventing a summary.
 
 ### Screenshot-heavy pages
 
 - If the extracted text is very short but the page carries several images, **the images are the content.** Download them and **read them** — do not file unexamined images and summarise from the caption text.
 
-## Step 3 — Verify before reporting
+## Step 4 — Verify before reporting
 
 - Every wikilink resolves to a real file. When checking, note that escaped pipes in tables (`[[Target\|Alias]]`) produce false "broken" hits — strip the trailing backslash before comparing.
 - Every embedded image path exists on disk.
 - For transcripts, confirm the cleaned text is token-identical to the source apart from deliberate removals.
 
-## Step 4 — Report
+## Step 5 — Report
 
 State: what was captured, where it was saved, and **anything that could not be captured and why.** Distinguish clearly between *"the extractor failed"* and *"the source does not have this publicly"* — they call for different follow-ups.
 
