@@ -1,0 +1,94 @@
+{
+  "ccimprove:clean-permissions": {
+    "argument_hint": null,
+    "command_description": "Clean up the permissions allow list in settings.json by removing one-off pastes, redundant entries, and dead MCP references"
+  },
+  "ccimprove:make-repeatable": {
+    "argument_hint": null,
+    "command_description": "Analyze recent work and propose how to make it repeatable as a skill or plugin"
+  },
+  "ccimprove:surface-usage-patterns": {
+    "argument_hint": null,
+    "command_description": "Surface usage patterns across all Claude Code sessions to identify opportunities for skills, plugins, agents, and CLAUDE.md improvements"
+  },
+  "company-setup:check-name": {
+    "argument_hint": "<candidate name> [--systems uspto,wa-sos,domain] [--class 35,42] [--json] [--refresh]",
+    "command_description": "Check whether a candidate company name is available across USPTO, WA Secretary of State, and major domain TLDs. Outputs a single aggregated report."
+  },
+  "dev:apply-feedback": {
+    "argument_hint": null,
+    "command_description": "Review [MK] comments in the current document and apply changes immediately without asking for permission"
+  },
+  "dev:code-review-iterative": {
+    "argument_hint": "Optional scope (file paths, branch name, or \"staged\")",
+    "command_description": "Run iterative code review with 3 parallel reviewers (PE, Sr SDE, QA) and diminishing fix thresholds across up to 4 iterations."
+  },
+  "dev:design-review-iterative": {
+    "argument_hint": "Optional path to design doc (defaults to most recent in docs/)",
+    "command_description": "Run iterative design document review with 3 parallel reviewers (PE, Sr SDE, Domain Expert) and diminishing fix thresholds across up to 4 iterations."
+  },
+  "dev:finish-work-on-local-worktree": {
+    "argument_hint": null,
+    "command_description": "Merge a local worktree into main, update doc statuses, update project plan, and recommend next work"
+  },
+  "dev:ml-design-review-iterative": {
+    "argument_hint": "Optional path to design doc (defaults to most recent in docs/)",
+    "command_description": "Run iterative ML design review with 3 parallel reviewers (Principal ML Engineer, Sr Applied Scientist, ML Ops Engineer) and diminishing fix thresholds across up to 4 iterations."
+  },
+  "dev:next-idea": {
+    "argument_hint": null,
+    "command_description": "\"Propose the single smartest, most innovative, accretive addition to the current project (BLUF + Pyramid output)\""
+  },
+  "dev:review-feedback": {
+    "argument_hint": null,
+    "command_description": "Review [MK] comments in the current document, present a plan for changes, and apply after approval"
+  },
+  "dev:setup-doc-conventions": {
+    "argument_hint": null,
+    "command_description": "Bootstrap doc-conventions in the current project. Creates docs/templates/ (including dashboard.base), docs/dashboard.md, configures Obsidian, and appends workflow section to CLAUDE.md."
+  },
+  "dev:summarize-this-session": {
+    "argument_hint": null,
+    "command_description": "\"Summarize the current conversation: task progress and continuous improvement insights\""
+  },
+  "fetch:alphaxiv-paper": {
+    "argument_hint": "<arxiv URL or paper ID> [output_dir]",
+    "command_description": "Look up an arxiv paper on alphaxiv.org for a structured AI-generated overview"
+  },
+  "fetch:blog-post": {
+    "argument_hint": "<article URL> [output_dir]",
+    "command_description": "Download a blog post/article as a self-contained folder (clean markdown + images + digitized charts)"
+  },
+  "fetch:notion-public-site": {
+    "argument_hint": "<Notion URL> [output_dir] [--test]",
+    "command_description": "Download all pages from a public Notion site as Markdown files with cross-references"
+  },
+  "fetch:scribd-document": {
+    "argument_hint": "<Scribd URL> [output_dir]",
+    "command_description": "Download all pages from a Scribd document as images"
+  },
+  "fetch:vedic-chart": {
+    "argument_hint": "<chart image or chart .json> [output_dir]",
+    "command_description": "Convert a Vedic horoscope chart image into structured JSON + ASCII North/South Indian charts"
+  },
+  "fetch:x-post": {
+    "argument_hint": "<X URL> [output_dir]",
+    "command_description": "Extract content from an X/Twitter post, thread, or article using the gstack browser. Detects threads automatically and downloads images locally."
+  },
+  "fetch:youtube-transcript": {
+    "argument_hint": "<YouTube URL> [output_dir]",
+    "command_description": "Extract transcript and metadata from a YouTube video using a persistent Chrome session"
+  },
+  "notes:clip": {
+    "argument_hint": "<URL> [extra instructions]",
+    "command_description": "Clip any URL into the notes vault. Routes to the right extractor and note-writer based on the source type."
+  },
+  "notes:create": {
+    "argument_hint": "--title \"Note Title\" --content \"Note content\" [--folder \"Subfolder\"] [--frontmatter '{\"key\":\"value\"}']",
+    "command_description": "Write a note into the current Obsidian vault, with frontmatter and folder placement."
+  },
+  "think:adhd": {
+    "argument_hint": "\"<problem to ideate on>\"",
+    "command_description": "Parallel divergent ideation. Spawns N isolated reasoning branches under different cognitive frames (regulator, biology, speedrunner, 10-year-old, $0 budget), scores them, prunes traps, and deepens the top survivors. For open-ended, high-stakes problems — architecture, naming, API surface design, fuzzy debugging, strategy. ~10 LLM calls per run, so reserve it for decision points."
+  }
+}
