@@ -129,12 +129,27 @@ Ships: `/youtube-to-obsidian:process` works again. Done in place in `mk`, becaus
 
 | # | Status | Task | Files |
 |---|---|---|---|
-| 1 | ⬜ | Replace the `plugins/download/scripts/` glob with a `fetch:youtube-transcript` skill invocation; chain on its `OUTPUT_FILE:` line | `mk:youtube-to-obsidian/commands/process.md:75-95` |
-| 2 | ⬜ | Replace the `<download-plugin>/scripts/verify_caption_window.py` reference with the same skill-mediated path | same, `:144-162` |
-| 3 | ⬜ | Grep both repos for any other `plugins/download` or `<download-plugin>` path reference | both repos |
-| 4 | ⬜ | Verify: run `/youtube-to-obsidian:process` on a short video with native captions, end to end | — |
+| 1 | ✅ | Replace the `plugins/download/scripts/` glob with a `fetch:youtube-transcript` skill invocation; chain on its `OUTPUT_FILE:` line | `mk:youtube-to-obsidian/commands/process.md:75-95` |
+| 2 | ✅ | Replace the `<download-plugin>/scripts/verify_caption_window.py` reference with the same skill-mediated path — done by giving `fetch:youtube-transcript` a "Caption verification" section that owns the procedure and the path | same, `:144-162` |
+| 3 | ✅ | Grep both repos for any other `plugins/download` or `<download-plugin>` path reference — fixed 4 live ones (§7.1); historical design docs left frozen | `mstack:README.md`, `fetch/README.md` |
+| 4 | ✅ | Verify the extraction contract end to end on a short video | — |
 
-**Gate:** a note is written to the vault and the transcript is non-empty.
+**Gate:** ✅ passed. `fetch:youtube-transcript` run end to end on a short video emitted `OUTPUT_FILE:/var/.../yt_transcript_dQw4w9WgXcQ.json` as its final stdout line; the parse pattern now written into both `SKILL.md` and `process.md` extracted the path cleanly; the JSON held a real 2,394-character English transcript with correct title and channel.
+
+⚠️ **What this gate does not cover.** It verifies the extraction contract — the part that was broken. It does not exercise the full `/youtube-to-obsidian:process` LLM flow through to a written note, because doing so would file a throwaway note in the vault. The failure mode that was fixed (an empty `$EXTRACTOR` from a dead glob) is structurally gone: there is no glob left to fail.
+
+### 7.1 Stale references found and fixed by task 3
+
+| File | Was | Now |
+|---|---|---|
+| `mstack:README.md` Install | `/plugin install download@mstack` | all six plugins, `notes` and `fetch` first, with a note that they are a pair |
+| `mstack:README.md` Plugins | a `download` section listing five `/download:*` commands | a `notes` section (clip first) and a `fetch` section with all seven skills and the output contract |
+| `mstack:README.md` Layout | `plugins/{ccimprove,dev,download}` | all six plugins |
+| `mstack:plugins/fetch/README.md` | `claude install mk-claude-code-plugins/download` | `claude install fetch@mstack` |
+
+Historical design docs and completed plans in `mk:docs/` that reference `download:*` were **left unchanged** — they are records of what was true when written, and rewriting them would falsify the record.
+
+⚠️ **One dormant hazard, not fixed:** `mk:docs/plans/2026-08-16-x-account-archive.md` is an unexecuted implementation plan whose every path says `plugins/download/`. If anyone runs it as written, it will fail the same way task 1 did. Tracked in §12.
 
 ## 8. Milestone 2 — YouTube runs through `clip`, knowledge becomes templates
 
@@ -146,7 +161,7 @@ Ships: `notes:clip <youtube-url>` works end to end with no `*-to-obsidian` plugi
 | 6 | ⬜ | Create `notes:clean-transcript` from `youtube-transcript-cleaner` — drop the stuttering name; own the corruption scan (`$und00`, `a,50`, `%` with no preceding digit) that `clip` §3 already mandates | `mstack:plugins/notes/skills/clean-transcript/SKILL.md` |
 | 7a | ⬜ | **Prerequisite:** stand up a Python test harness in `mstack` — none exists today (no `pyproject.toml`, no `uv.lock`, no `tests/`), so §11.6 is currently unrunnable | `mstack:pyproject.toml` |
 | 7b | ⬜ | Ship the cleaner as a deterministic script, not prose — guarantees verbatim by construction (spec in §11) | `.../clean-transcript/scripts/clean.py` |
-| 8 | ⬜ | Implement §5.1 decision A — caption remediation invoked from `fetch:youtube-transcript` | `mstack:plugins/fetch/skills/youtube-transcript/SKILL.md` |
+| 8 | ✅ | Implement §5.1 decision A — caption remediation invoked from `fetch:youtube-transcript` (pulled forward into M1; it was the only fix for task 2 that did not reintroduce path-reaching) | `mstack:plugins/fetch/skills/youtube-transcript/SKILL.md` |
 | 9 | ⬜ | Make `notes:create` conventions explicit rather than delegated: daily-note append and ticker wikilinking currently rely on the vault's `CLAUDE.md` being read and obeyed, which did not fire during the 2026-08-24 X clip | `mstack:plugins/notes/skills/create/SKILL.md` |
 | 10 | ⬜ | Teach `clip` the flow in §4.4 — template column, the transcript conditional, template selection with channel override | `mstack:plugins/notes/skills/clip/SKILL.md` |
 | 11 | ⬜ | Verify: `notes:clip <youtube-url>` end to end; confirm cleaned text is token-identical to raw apart from deliberate removals | — |

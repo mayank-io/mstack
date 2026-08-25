@@ -11,10 +11,15 @@ Claude Code plugin marketplace for development and continuous-improvement workfl
 Then enable individual plugins:
 
 ```
-/plugin install ccimprove@mstack
+/plugin install notes@mstack
+/plugin install fetch@mstack
 /plugin install dev@mstack
-/plugin install download@mstack
+/plugin install ccimprove@mstack
+/plugin install company-setup@mstack
+/plugin install think@mstack
 ```
+
+`notes` and `fetch` are a pair — `notes:clip` routes to `fetch:*` for everything it captures, so installing `notes` alone leaves most routes dead.
 
 ## Plugins
 
@@ -85,17 +90,33 @@ Field semantics:
 - `from` / `content` — context to help Claude calibrate trust and tone for these comments.
 - `action` — interpretation guidance. Does **not** override the skill's posture (`apply-feedback` still applies immediately, `review-feedback` still gates on approval), but informs *how* matched comments are treated within that posture.
 
-### `download` — pull content into local Markdown
+### `notes` — capture a source into your vault
 
-Save what you read so it stays searchable, summarizable, and yours.
+**Start here.** `clip` is the single entry point: hand it a URL and it routes to the right fetcher, then files the result into whichever Obsidian vault you are running in.
 
-| Command | What it does |
+| Skill | What it does |
 |---|---|
-| `/download:youtube-transcript` | Transcript + metadata + chapters + speakers from a YouTube URL (persistent Chrome profile) |
-| `/download:x-post` | Single tweet, full thread, or X Article — auto-detects threads and downloads images |
-| `/download:notion-public-site` | Crawl a public Notion site, save every page as Markdown with wikilinks and embedded images |
-| `/download:scribd-document` | Pull every page of a Scribd document as zero-padded `.jpg` files via embed view |
-| `/download:alphaxiv-paper` | Structured AI-generated overview of any arXiv paper from alphaxiv.org |
+| `notes:clip` | URL in, note out — routes by host, chains on the fetcher's result line |
+| `notes:create` | Write a note into the current vault; owns frontmatter, folder, filename, collisions |
+| `notes:save-local-file` | File already on disk → note, archiving the file into the vault's attachments |
+
+The vault is wherever the session is — found by walking up for a `.obsidian/` directory. There is no `vault_path` config.
+
+### `fetch` — pull content from a source into a directory
+
+The layer beneath `notes`. Each skill gets content out of one source and knows nothing about vaults. Useful directly when you want the raw material somewhere of your choosing.
+
+| Skill | What it does |
+|---|---|
+| `fetch:youtube-transcript` | Transcript + metadata + chapters + speakers from a YouTube URL (persistent Chrome profile, Whisper fallback, caption-integrity verification) |
+| `fetch:x-post` | Single tweet, full thread, or X Article — auto-detects threads and downloads images |
+| `fetch:blog-post` | Article to self-contained Markdown + images, recovering the lazy-loaded ones Defuddle drops |
+| `fetch:notion-public-site` | Crawl a public Notion site, save every page as Markdown with wikilinks and embedded images |
+| `fetch:scribd-document` | Pull every page of a Scribd document as zero-padded `.jpg` files via embed view |
+| `fetch:alphaxiv-paper` | Structured AI-generated overview of any arXiv paper from alphaxiv.org |
+| `fetch:vedic-chart` | Digitize a Vedic astrology chart image into structured data |
+
+**Contract.** Every `fetch:*` skill takes `<url-or-path> [output_dir]` — a temp directory when omitted — never writes outside it, and prints `OUTPUT_FILE:<path>` or `OUTPUT_DIR:<path>` as its final stdout line. Chain on that line; never reconstruct the path.
 
 ## Conventions
 
@@ -111,8 +132,11 @@ mstack/
 │   └── marketplace.json    # marketplace manifest
 └── plugins/
     ├── ccimprove/
+    ├── company-setup/
     ├── dev/
-    └── download/
+    ├── fetch/
+    ├── notes/
+    └── think/
 ```
 
 Each plugin follows the standard layout:
@@ -123,7 +147,7 @@ Each plugin follows the standard layout:
 ├── commands/<name>.md      # thin wrappers
 ├── skills/<name>/SKILL.md  # implementations
 ├── hooks/                  # (dev only)
-├── scripts/                # (dev, download)
+├── scripts/                # (dev, fetch)
 └── templates/              # (dev only)
 ```
 

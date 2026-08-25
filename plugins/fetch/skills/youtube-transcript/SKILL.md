@@ -69,13 +69,45 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/youtube_transcript_extractor.py" "<URL>" 
 
 Do not pass `--headless`; it is ignored.
 
-**Important:** The script outputs a temp file path to stdout. Read the JSON from that file path.
+**Important:** The script writes the transcript JSON to a file and prints its path as the **final stdout line**, prefixed per the skill contract:
+
+```
+OUTPUT_FILE:/var/folders/.../yt_transcript_abc123.json
+```
+
+Strip the prefix before using it — do not consume the whole line as a path:
 
 ```bash
-# Example
-output_path=$(python3 script.py "https://youtube.com/watch?v=abc123" --profile ~/.claude/youtube-chrome-profile)
-# output_path will be something like: /var/folders/.../yt_transcript_abc123.json
+last=$(python3 "${CLAUDE_PLUGIN_ROOT}/scripts/youtube_transcript_extractor.py" \
+         "https://youtube.com/watch?v=abc123" --profile ~/.claude/youtube-chrome-profile | tail -1)
+case "$last" in
+  OUTPUT_FILE:*) json="${last#OUTPUT_FILE:}" ;;
+  *) echo "extractor did not emit a result line — stop and report it"; exit 1 ;;
+esac
 ```
+
+Then read the JSON from `$json`. Earlier stdout lines are progress output and caption-integrity warnings; only the last line is the contract.
+
+## Caption verification — recovering dropped figures
+
+YouTube auto-captions silently drop words, disproportionately **numbers in Q&A** — a CEO answering "what percentage of revenue is defense?" with "about 60%", where the caption ate the "60%". Reasoning from the lossy caption produces confidently-wrong summaries.
+
+The extractor detects this and emits `caption_warnings` (see below). **Remediation lives here, in this skill** — recovering a figure the caption dropped is getting the content *correctly*, which is retrieval, not shaping. Callers must not locate the verify script themselves.
+
+If `caption_warnings` is non-empty, re-transcribe those windows from the audio. Pass every window in one call — the script downloads the audio once via the android client (which bypasses YouTube's DRM/SABR wall), clips each window with ffmpeg, and Whispers it:
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/verify_caption_window.py" "<URL>" \
+  --windows 686-718,1204-1230 --model small
+```
+
+It prints `{"windows": [{"start", "end", "text"}]}`.
+
+Reconcile each `text` against the native transcript for that window. When Whisper contains a figure the caption lacks — the common case — **splice the recovered words into the raw transcript** so the correction flows into everything downstream. Report each recovery to the user; never silently rely on the caption for a flagged window.
+
+If `whisper`, `yt-dlp` or `ffmpeg` is unavailable, **do not guess the figure.** Keep the caption text and tell the user the window could not be verified.
+
+⚠️ `caption_warnings` detects **omitted** numbers only. It cannot see a **corrupted** one (`$und00` for `$1,050`, `a,50` for `1,050`). That scan belongs to the cleaning step.
 
 ## Output Format (v2.0)
 

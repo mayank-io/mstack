@@ -162,5 +162,5 @@ npm install -g defuddle-cli   # for /fetch:blog-post
 ## Installation
 
 ```bash
-claude install mk-claude-code-plugins/download
+claude install fetch@mstack
 ```
