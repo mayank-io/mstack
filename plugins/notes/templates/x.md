@@ -58,7 +58,38 @@ Number every post. **Start from the thread root, not the shared link** — `fetc
 
 ## Body — X Article
 
-`# {{Article Title}}`, header image, then the article body with its own headings, paragraphs and inline images preserved in order.
+Add `x-article` to `tags`. An Article is a full essay, not a post — one ran to 44,000 characters across 28 sections.
+
+```markdown
+# {{article_title}}
+
+![{{article_title}}](attachments/{{filename}}.jpg)
+
+{{intro — the text before the first heading, including the subtitle line}}
+
+## {{h1 heading}}
+
+{{section text}}
+
+### {{h2 heading}}
+
+{{section text}}
+```
+
+- **`h1` → `##`, `h2` → `###`.** The document title is the note's only `#`.
+- **Keep the intro.** The text before the first heading carries the subtitle and thesis; it is not preamble to drop.
+- **Never emit a heading twice.** `fetch:x-post` returns the body as one block *with the headings already inside it*, plus a separate heading list for splitting. Concatenating the list onto the body duplicates all of them.
+- **Sections in document order**, never sorted or grouped.
+
+### Reference list
+
+A well-sourced Article can carry 50+ external links. When there are more than ~10, add a section after the body summarising them by domain — the citation profile is often the most reusable part of the note:
+
+```markdown
+## Sources
+
+{{n}} external references: {{count}} {{domain}} · {{count}} {{domain}} · …
+```
 
 ## Required sections
 

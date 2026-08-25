@@ -250,22 +250,61 @@ for _ in range(5):
 
 ### Step 3: Detect X Article (Long-Form)
 
-If `content` is empty or very short (< 50 characters), the post is an X Article. Fall back to accessibility snapshot:
+**`tweetText` empty or under ~50 characters means an X Article, not a short post.** Step 2 returns `text: ""` for a 44,000-character essay, so treat emptiness as a signal rather than a result.
 
-1. Capture the full page structure with `"$B" snapshot` — the gstack accessibility snapshot. Do **not** use `mcp__playwright__browser_snapshot`: a fresh Playwright session is logged out and X Articles are frequently gated.
-2. Parse the snapshot for article content:
-   - **Title**: Look for text in `generic` elements near the top of the article
-   - **Headings**: `heading [level=1]` or `heading [level=2]` elements
-   - **Body text**: Sequential `generic` elements containing article paragraphs
-   - **Links**: `link` elements with URLs
-   - **Images**: `link "Image"` elements (note position for context)
-3. Reconstruct the article text from the snapshot elements in order
+Extract from the DOM, not from `"$B" snapshot`. Measured on a real article (`saylor/2091923153542840808`, 43,261 characters):
 
-For X Articles, preserve:
-- Section headings (as markdown ## headers)
-- Numbered/bulleted lists
-- Embedded links
-- Note where images appear in the flow (as `[Image: context]` markers)
+```javascript
+() => {
+  const root = document.querySelector('[data-testid=twitterArticleRichTextView]');
+  if (!root) return {err: 'not an article'};
+  const body = root.querySelector('[data-testid=longformRichTextComponent]');
+  return {
+    body: body ? body.innerText : '',
+    headings: Array.from(root.querySelectorAll('h1,h2,h3'))
+      .map(h => ({level: h.tagName.toLowerCase(), text: h.innerText.trim()}))
+      .filter(h => h.text),
+    links: Array.from(root.querySelectorAll('a[href^="http"]'))
+      .map(a => ({text: (a.innerText || '').trim(), href: a.href})),
+    images: Array.from(root.querySelectorAll('img'))
+      .map(i => i.src).filter(s => s && s.includes('pbs.twimg.com/media'))
+      .map(s => s.replace(/name=\w+/, 'name=orig'))
+  };
+}
+```
+
+**The body arrives as ONE block, and the headings are inside it.** This is the part that produces a mangled note if you assume otherwise:
+
+| Assumption | Reality on a live article |
+|---|---|
+| Sequential paragraph elements | **1** `longformRichTextComponent`, 43,261 chars |
+| `<p>` tags to iterate | **0** — X renders divs and `<br>`, no paragraph tags |
+| Headings are separate from the body | **28 headings, all 28 also present inside the body text** |
+
+So the heading list is an *index*, not content to concatenate. Appending headings to the body duplicates every one; rendering only the headings loses the entire article.
+
+**Rebuild the structure by splitting the body on its own headings, in order:**
+
+```python
+pos, cur = [], 0
+for h in headings:                       # document order
+    i = body.find(h["text"], cur)
+    if i == -1:
+        continue                         # report it; do not silently drop
+    pos.append((i, h)); cur = i + len(h["text"])
+
+intro = body[:pos[0][0]].strip()
+sections = [
+    (h, body[i + len(h["text"]) : (pos[n+1][0] if n+1 < len(pos) else len(body))].strip())
+    for n, (i, h) in enumerate(pos)
+]
+```
+
+**Verify the split reassembles.** `len(intro) + sum(len(heading) + len(text))` should equal the body length to within trimmed whitespace. A heading that appears twice in the body, or a `find` that misses, silently drops a whole section otherwise — and the note still looks complete.
+
+**Why not `"$B" snapshot`:** it returned **53,899 bytes** for this one article, and the accessibility tree flattens the heading/body relationship that the split above depends on. The DOM carries the same content with the structure intact.
+
+Preserve in the output: section headings with their level, the intro before the first heading, embedded links (a well-sourced article can carry 59 of them — worth keeping as a reference list), and image positions.
 
 ### Step 4: Thread Detection
 
