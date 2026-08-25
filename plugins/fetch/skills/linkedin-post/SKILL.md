@@ -77,38 +77,46 @@ The control is **not always present**, and where it appears depends on the surfa
 
 **So try the listing surface when the permalink is short.** If a permalink yields a body under ~250 characters with no expander, the same post on its author's `/posts/` listing usually carries the full text plus a working "…more".
 
-Click every expander that belongs to the **post body**, not to comments:
+### Match the control by its TEXT, never by class or aria-label
+
+**LinkedIn ships obfuscated, rotating class names.** The real control looks like this:
+
+```
+<button class="_5a3a1b6d _22e49b38 _060cf413 _6093ac50 …">… more</button>
+```
+
+Hashed classes, and **`aria-label` is empty**. Every class-based or aria-based selector fails silently — it matches nothing and reports zero expanders, which is indistinguishable from a post that needed no expansion. The only stable signal is the **button's text: `… more`**.
+
+Match it exactly. A loose `/more/i` also catches `"More actions for <company>"`, which opens a menu:
 
 ```javascript
-// Synchronous — page JS must never be async here.
 () => {
-  const clicked = [];
-  document.querySelectorAll(
-    '.feed-shared-inline-show-more-text__see-more-less-toggle, ' +
-    '.show-more-less-text__button--more, ' +
-    'button.see-more, ' +
-    '[aria-label*="see more" i], [aria-label*="show more" i]'
-  ).forEach(b => {
-    // Skip comment expanders — they add replies, not post text.
-    if (b.closest('.comments-comment-item, .comments-comment-entity')) return;
-    if (/comment/i.test(b.innerText || '')) return;
-    b.click();
-    clicked.push((b.innerText || b.getAttribute('aria-label') || '').trim().slice(0, 30));
+  let n = 0;
+  Array.from(document.querySelectorAll('button')).forEach(b => {
+    const t = (b.innerText || '').trim();
+    if (!/^(…|\.\.\.)?\s*(see|show)?\s*more$/i.test(t)) return;   // exact, not "More actions for X"
+    if (b.closest('.comments-comment-item, .comments-comment-entity')) return;  // comments, not body
+    b.click(); n++;
   });
-  return clicked;
+  return n;
 }
 ```
 
-Then wait and re-measure from Python:
+### Loop until no expanders remain — one pass is not enough
+
+Expanding reveals **more posts**, each with its own control. Measured on a real company listing: round 1 clicked 3, which surfaced 10 more; round 2 clicked those 10; round 3 found none.
 
 ```python
-before = await page.evaluate("() => document.body.innerText.length")
-clicked = await page.evaluate(EXPAND_JS)
-await page.wait_for_timeout(1200)
-after = await page.evaluate("() => document.body.innerText.length")
+for _ in range(8):
+    n = await page.evaluate(EXPAND_JS)
+    if n == 0:
+        break                       # converged
+    await page.wait_for_timeout(1800)
 ```
 
-**Report the delta.** A click that adds ~50 characters expanded a comment, not the post — that is the signature of hitting the wrong control, and it looks like success otherwise.
+**Verified 2026-08-24** on `linkedin.com/company/kodiakai/posts/`: 13 expanders over 3 rounds, body **5,725 → 11,628 characters — 2× the text**. Stopping after one pass would have captured roughly half the page and looked complete.
+
+**Report the character delta.** A click that adds ~50 characters expanded a comment, not the post — the signature of hitting the wrong control, which otherwise looks like success.
 
 ### Login walls
 
@@ -138,11 +146,20 @@ Use `"$B" snapshot` for the accessibility tree, and `$B js` for anything structu
 
 ### Tell attachments apart from page furniture
 
-Filtering by size alone does not work — avatars are 400×400 and pass any sensible threshold. On one real post, a naive `naturalWidth >= 200` filter returned **8 images, of which 7 were furniture**. Discriminate on the **URL path segment**, which LinkedIn sets by role:
+Filtering by size alone does not work — avatars are 400×400 and pass any sensible threshold. Discriminate on the **URL path segment**, which LinkedIn sets by role.
+
+Measured 2026-08-24 against the live site:
+
+| Surface | naive `naturalWidth >= 200` | path-segment filter |
+|---|---|---|
+| A post permalink | 2 images | **1** — the actual attachment |
+| A company posts listing | 5 images | **1** — the actual attachment |
+| (an earlier read of the same permalink) | 8 images | **1** — the other 7 were avatars, a banner and sidebar covers |
+
 
 | URL contains | What it is | Take it? |
 |---|---|---|
-| `/image-shrink_` , `/feedshare-shrink_` , `/feedshare-` | **post attachment** | ✅ yes |
+| `/image-shrink_` , `/feedshare-shrink_` , `/feedshare-image-high-res` , `/feedshare-` | **post attachment** — all four observed live | ✅ yes |
 | `/profile-displayphoto` | author or commenter avatar | ❌ no |
 | `/profile-displaybackgroundimage` | profile banner | ❌ no |
 | `/article-cover_image` | "more from LinkedIn" sidebar | ❌ no |
