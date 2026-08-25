@@ -1,0 +1,18 @@
+[project]
+name = "mstack"
+version = "0.0.0"
+description = "Test harness for scripts shipped inside mstack plugins."
+requires-python = ">=3.10"
+dependencies = []
+
+[dependency-groups]
+dev = ["pytest>=8.0"]
+
+[tool.pytest.ini_options]
+testpaths = ["plugins"]
+python_files = ["test_*.py"]
+addopts = "-q"
+
+# This project is not a package — it is a marketplace of plugins. The pyproject
+# exists so the Python scripts shipped inside plugins can be tested. Each script
+# keeps its tests beside it at plugins/<plugin>/skills/<skill>/tests/.

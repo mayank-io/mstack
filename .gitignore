@@ -11,3 +11,6 @@ __pycache__/
 
 # git worktrees (co-located, gitignored)
 .worktrees/
+
+# uv virtualenv for the plugin script test harness
+.venv/
