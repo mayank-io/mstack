@@ -50,7 +50,7 @@ Extract the `{username}` and `{id}` (status ID) from the URL.
 Drive the **gstack browser** through the `_browse.py` adapter — never `mcp__playwright__*`. The adapter exposes a Playwright-shaped API (`goto`, `wait_for_selector`, `evaluate`) over `$B`, so the page-context JavaScript below is unchanged from the Playwright version; only the driver differs.
 
 ```python
-import asyncio, json, sys
+import asyncio, json, sys   # asyncio only for asyncio.run()
 sys.path.insert(0, "${CLAUDE_PLUGIN_ROOT}/scripts")
 from _browse import browse_page
 
@@ -63,7 +63,7 @@ async def main():
         for _ in range(15):                    # poll up to 7.5s for media to load
             if await page.evaluate(IMAGES_READY_JS):
                 break
-            await asyncio.sleep(0.5)
+            await page.wait_for_timeout(500)
         print(json.dumps(await page.evaluate(JS)))
 
 asyncio.run(main())
@@ -151,15 +151,15 @@ The extraction function itself:
 When a post is a self-reply inside a thread, X renders its ancestor posts ABOVE the focal `<article>` in the conversation (DOM order: ancestors → focal → replies). Detect them:
 
 ```javascript
-async (page) => {
-  await page.goto('FOCAL_URL_HERE');
-  await page.waitForSelector('article', { timeout: 15000 });
-  await page.waitForTimeout(1500);
-
-  const focalId = 'FOCAL_ID_HERE';
-  const focalHandle = 'FOCAL_HANDLE_HERE';
-
-  return await page.evaluate(({ focalId, handle }) => {
+// Python driver (the JS below is the page-context evaluate):
+//   await page.goto("FOCAL_URL_HERE")
+//   await page.wait_for_selector("article", timeout=15000)
+//   await page.wait_for_timeout(1500)
+//   roots = await page.evaluate(JS, {"focalId": "...", "handle": "..."})
+// Arguments ARE passed through — but only because the adapter applies them.
+// Until 2026-08-24 they were silently dropped, and focalId arriving as
+// undefined made this walk report "not a thread" for every real thread.
+({ focalId, handle }) => {
     const articles = Array.from(document.querySelectorAll('article'));
 
     const handleOf = (a) => {
@@ -198,11 +198,10 @@ async (page) => {
       .sort((a, b) => a.length - b.length || (a < b ? -1 : a > b ? 1 : 0));
 
     return { hasEarlier: ancestors.length > 0, rootId: cluster[0], ancestors };
-  }, { focalId, handle: focalHandle });
 }
 ```
 
-**Replace** `FOCAL_URL_HERE`, `FOCAL_ID_HERE`, and `FOCAL_HANDLE_HERE` with the values from Step 2.
+**Replace** `FOCAL_URL_HERE` in the driver, and pass `focalId` / `handle` as the `evaluate` argument object rather than interpolating them into the JavaScript — an interpolated handle containing a quote would break the expression.
 
 **Interpreting results:**
 
@@ -211,13 +210,12 @@ async (page) => {
 
 **Robustness — ancestors can lazy-load.** If `hasEarlier` is `false` but the focal post looks like a continuation (starts mid-sentence or with a connector like "And"/"But", opens with a list marker, or the article shows a "Show this thread" affordance), scroll UP a few times and re-check before concluding it is the first post:
 
-```javascript
-async (page) => {
-  for (let i = 0; i < 5; i++) {
-    await page.evaluate(() => window.scrollBy(0, -window.innerHeight));
-    await page.waitForTimeout(800);
-  }
-}
+```python
+# Python — the wait cannot live in page JS; $B js returns before a promise
+# resolves, so an in-page `await sleep()` loses the result silently.
+for _ in range(5):
+    await page.evaluate("() => window.scrollBy(0, -window.innerHeight)")
+    await page.wait_for_timeout(800)
 ```
 
 ### Step 3: Detect X Article (Long-Form)
@@ -246,20 +244,20 @@ For X Articles, preserve:
 On the first post's page, scroll down to load thread posts, then find all articles by the same author. Capture a content snippet and a "replying to another user" flag for each, so the candidates can be filtered down to the genuine thread:
 
 ```javascript
-async (page) => {
-  // Scroll down to load thread posts below the fold
-  let previousCount = 0;
-  for (let i = 0; i < 10; i++) {
-    await page.evaluate(() => window.scrollBy(0, window.innerHeight));
-    await page.waitForTimeout(1000);
-    const currentCount = await page.evaluate(() => document.querySelectorAll('article').length);
-    if (currentCount === previousCount && i > 1) break;
-    previousCount = currentCount;
-  }
-
-  const focalHandle = 'FOCAL_HANDLE_HERE';
-
-  return await page.evaluate((handle) => {
+// Python driver — scroll down to load thread posts below the fold:
+//   previous = 0
+//   for i in range(10):
+//       await page.evaluate("() => window.scrollBy(0, window.innerHeight)")
+//       await page.wait_for_timeout(1000)
+//       current = await page.evaluate("() => document.querySelectorAll('article').length")
+//       if current == previous and i > 1: break
+//       previous = current
+//
+// X's timeline is VIRTUALISED: articles unmount as they leave the viewport.
+// Accumulate into a page-context variable keyed by status id across the loop,
+// then read it out once — a single pass at the end loses everything scrolled
+// past. The JS below is the page-context evaluate:
+(handle) => {
     const articles = document.querySelectorAll('article');
     const posts = [];
     const seen = new Set();
@@ -304,11 +302,10 @@ async (page) => {
     });
 
     return posts;
-  }, focalHandle);
 }
 ```
 
-**Replace `FOCAL_HANDLE_HERE` with the `handle` value from Step 2.**
+Pass the author handle as the `evaluate` argument (`await page.evaluate(JS, handle)`), not by string-interpolating it into the JavaScript.
 
 **Interpreting results:**
 

@@ -1,6 +1,6 @@
 ---
 name: blog-post
-description: This skill should be used when the user shares a blog/article URL (Medium, Substack, personal blog, news/long-form post) and asks to "download this blog post", "save this article", "archive this post with images", "clip this medium article", or otherwise wants a self-contained local copy. Extracts clean markdown via Defuddle, recovers lazy-loaded images via Playwright (which Defuddle drops), and — when the article contains Vedic astrology charts — invokes the fetch:vedic-chart skill to digitize them. Saves a folder with frontmatter + an images/ subfolder.
+description: This skill should be used when the user shares a blog/article URL (Medium, Substack, personal blog, news/long-form post) and asks to "download this blog post", "save this article", "archive this post with images", "clip this medium article", or otherwise wants a self-contained local copy. Extracts clean markdown via Defuddle, recovers lazy-loaded images via the gstack browser (which Defuddle drops), and — when the article contains Vedic astrology charts — invokes the fetch:vedic-chart skill to digitize them. Saves a folder with frontmatter + an images/ subfolder.
 ---
 
 # Download Blog Post
@@ -10,8 +10,8 @@ frontmatter, every inline image downloaded and re-referenced, and any Vedic
 astrology charts digitized to JSON + ASCII.
 
 This combines two tools: **Defuddle** (clean text, fast, low-token) for the article
-body, and **Playwright** for images — because Defuddle strips lazy-loaded `<img>`
-tags, leaving empty `![]()` placeholders. Playwright recovers the real image URLs
+body, and the **gstack browser** for images — because Defuddle strips lazy-loaded `<img>`
+tags, leaving empty `![]()` placeholders. A real browser recovers the image URLs
 in document order.
 
 
@@ -73,20 +73,38 @@ the body to the real article using structural landmarks, not the extractor's edg
 
 Drop any empty `![]()` image placeholders — real images are wired in at Step 4.
 
-### Step 3: Recover image URLs in order (Playwright)
+### Step 3: Recover image URLs in order
 
-Navigate with Playwright, scroll to trigger lazy-loading, then collect each article
-image's high-res URL **and an anchor** (nearest preceding heading) so it can be
-placed correctly later. Select **all** content `<img>` elements — figure-wrapped
-(Medium) and bare (Substack, WordPress, personal blogs) alike — filtering out icons
-and avatars by size, and de-duplicate by URL:
+Scroll to trigger lazy-loading, then collect each article image's high-res URL **and an anchor** (nearest preceding heading) so it can be placed correctly later. Select **all** content `<img>` elements — figure-wrapped (Medium) and bare (Substack, WordPress, personal blogs) alike — filtering out icons and avatars by size, and de-duplicate by URL.
+
+**The scroll loop runs in Python, not in the page.** `$B js` returns before a promise resolves, so `await sleep()` inside page JavaScript silently loses its result — this step returned "no images found" that way. Every `evaluate` below is synchronous; the waiting is `wait_for_timeout`:
+
+```python
+import asyncio, json, sys
+sys.path.insert(0, "${CLAUDE_PLUGIN_ROOT}/scripts")
+from _browse import browse_page
+
+async def main():
+    async with browse_page() as page:
+        await page.goto("THE_URL_HERE")
+        await page.wait_for_selector("article, body")
+
+        height = await page.evaluate("() => document.body.scrollHeight")
+        for y in range(0, height + 1, 600):          # trigger lazy-loading
+            await page.evaluate("(y) => window.scrollTo(0, y)", y)
+            await page.wait_for_timeout(120)
+        await page.evaluate("() => window.scrollTo(0, 0)")
+        await page.wait_for_timeout(500)             # let the top settle
+
+        print(json.dumps(await page.evaluate(COLLECT_JS)))
+
+asyncio.run(main())
+```
+
+`COLLECT_JS` — synchronous, because everything async now happens above:
 
 ```javascript
-async () => {
-  const sleep = ms => new Promise(r => setTimeout(r, ms));
-  const h = document.body.scrollHeight;
-  for (let y = 0; y <= h; y += 600) { window.scrollTo(0, y); await sleep(120); }
-  window.scrollTo(0, 0); await sleep(500);
+() => {
   const article = document.querySelector('article') || document.body;
   const imgs = Array.from(article.querySelectorAll('img'))
     .filter(img => (img.naturalWidth || img.width || 0) >= 200);  // skip icons/avatars
@@ -106,7 +124,7 @@ async () => {
 }
 ```
 
-**Count check**: trust this Playwright list as the complete, ordered set. Defuddle's
+**Count check**: trust this browser-collected list as the complete, ordered set. Defuddle's
 `![]()` placeholder count is often lower — it drops figures entirely. If the list is
 empty but the body clearly references images, scroll further and re-run (some sites
 defer loading until deep in the viewport).
@@ -167,7 +185,7 @@ were digitized.
 ## Tips
 
 - Defuddle over WebFetch: cleaner markdown, far fewer tokens.
-- Medium blocks plain HTTP for images and lazy-loads them — Playwright is required
+- Medium blocks plain HTTP for images and lazy-loads them — a real browser is required
   to get real URLs; Defuddle alone yields empty `![]()`.
 - Anchor images by their nearest preceding heading; placing by raw order breaks when
   Defuddle drops a figure.
