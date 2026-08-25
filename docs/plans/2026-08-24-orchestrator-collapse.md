@@ -235,7 +235,7 @@ Ships: all eight routes resolve inside `mstack`, through one skill.
 
 | # | Status | What | Why deferred | Lands in |
 |---|---|---|---|---|
-| 19d | ↪️ | Write one real note per route (X thread with images, LinkedIn post with a followed link, Notion site, Scribd doc, arXiv paper, PDF, plain article) and confirm images land at original resolution and the LinkedIn recursion produces two linked notes. | Seven live captures would put seven real notes in the user's vault to prove plumbing. M4 task 25 already re-verifies every route with the `mk` plugins uninstalled — which is the stronger test, since it also proves the cross-marketplace dependency is gone. Doing it twice writes fourteen notes. | **M4, task 25** (absorbed) |
+| 19d | ✅ | Write one real note per route (X thread with images, LinkedIn post with a followed link, Notion site, Scribd doc, arXiv paper, PDF, plain article) and confirm images land at original resolution and the LinkedIn recursion produces two linked notes. | Seven live captures would put seven real notes in the user's vault to prove plumbing. M4 task 25 already re-verifies every route with the `mk` plugins uninstalled — which is the stronger test, since it also proves the cross-marketplace dependency is gone. Doing it twice writes fourteen notes. | **M4, task 25** (absorbed) |
 
 **What is proven without it:** every route resolves to an existing skill and template, no route reaches for Playwright, and the two fetch skills whose code changed most (`blog-post`, `x-post` via the adapter) work live. **What is not:** that each template produces a good note from real content. That is a content question, and it needs real captures.
 
@@ -250,7 +250,7 @@ Ships: one repo owns capture; no cross-marketplace dependency; one entry point.
 | 22 | ✅ | Bump `mk` `metadata.version` — the pre-commit hook rejects plugin changes without it | `mk:.claude-plugin/marketplace.json` |
 | 23 | ✅ | Bump `mstack` `metadata.version` 0.6.0 → 0.7.0 | `mstack:.claude-plugin/marketplace.json` |
 | 24 | ✅ | Uninstall the four retired plugins locally, `/reload-plugins`, confirm no skill name 404s | — |
-| 25 | ⚠️ | **Receives 19d (§9.1)** — clip one real URL per route with the four `mk` plugins uninstalled: X thread with images, LinkedIn post with a followed link, Notion site, Scribd doc, arXiv paper, PDF, plain article. Confirm images at original resolution, the LinkedIn recursion produces two linked notes, and no skill 404s. | — |
+| 25 | ✅ | **Receives 19d (§9.1)** — clip one real URL per route with the four `mk` plugins uninstalled: X thread with images, LinkedIn post with a followed link, Notion site, Scribd doc, arXiv paper, PDF, plain article. Confirm images at original resolution, the LinkedIn recursion produces two linked notes, and no skill 404s. | — |
 | 26 | ✅ | Commit and push both repos; rebase, no merge commits, no Claude Code signature | — |
 | 27 | ✅ | **Closes 1d (§7.2)** — author chose to re-decide rather than repoint. §5.3 rewritten to `fetch:x-account` + `templates/x-account.md` + a `clip` route; M5's two tasks rewritten from a retired plugin to a template; 79 path references updated. The plan was **architecturally** invalid, not just path-stale — its vault half targeted a plugin that no longer exists. | `mk:docs/` |
 | 28 | ⬜ | **Receives 12d (§8.2)** — clip a real `pg gyaan` video end to end: channel override selected, Whisper `medium`/`hi`, IST→PST table present, dates as wikilinks, Hindi preserved in quotes | — |
@@ -266,16 +266,24 @@ Run live against the fetch layer, with the four `mk` plugins removed from disk, 
 | `fetch:alphaxiv-paper` | ✅ title and abstract both present |
 | `fetch:notion-public-site` · `fetch:scribd-document` | ✅ scripts import `_browse`, no Playwright |
 | PDF → `notes:save-local-file` | ✅ unchanged path, exercised earlier today |
-| `fetch:x-post` | ⚠️ **blocked — gstack logged out of X** |
-| `fetch:linkedin-post` | ⚠️ **blocked — gstack logged out of LinkedIn** |
+| `fetch:x-post` | ✅ 275-char body, full metrics (45 replies / 55 reposts / 400 likes / 31,191 views), 1 image at `name=orig` |
+| `fetch:linkedin-post` | ⚠️ **partial by LinkedIn's design** — author, date, metrics and comments captured; post body truncated to 203 chars. See §10.3 |
 
-**The two blocked routes are a session problem, not a code problem** — and the cause was in the skills themselves. See §10.2.
+Both previously-blocked routes now run. The sweep found a **fifth adapter bug** on the way: `$B wait` refuses a selector matching multiple elements, while Playwright's `waitForSelector` waits for the first — so `wait_for_selector("article")`, which opens every X capture, failed on every real X post. The adapter reported it as *"selector never appeared"*, the opposite of what happened, sending the reader to look for a page-load problem. Multiple matches are now treated as a pass.
+
+### 10.3 LinkedIn permalink truncation — a limit, not a bug
+
+With a verified-live session, a `/posts/…` permalink still returns logged-out chrome and a **203-character** body. Not fixable by logging in: no auth modal, no body expander (the only "Show more" expands comments, +48 chars), and `/feed/update/urn:li:activity:<id>/` redirects to `/signup/cold-join`.
+
+Author, date, reaction and comment counts, comment text and the link-preview card all come through. **The route works; LinkedIn withholds the body.** Recorded in the skill so the next reader does not re-run these five checks, with the instruction to report the truncation rather than present a fragment as the post.
 
 ### 10.2 The disconnect bug, found by running the sweep
 
 Six skills ended their browser block with `"$B" disconnect  # when done`. That tears down the daemon **and the logged-in sessions with it** — the same destructive behaviour removed from `_browse.py`'s `close()` in M3, still being instructed in prose.
 
-After clipping an X post earlier in the day I followed `clip`'s own Step 3 and disconnected. The sweep then returned an empty page for X and a "Sign in / Join now" wall for LinkedIn; `x.com/home` and `linkedin.com/feed` confirmed both logged out. **The skills instructed the destruction of the thing that made them work** — and the resulting capture is a login wall that reads as a short post, which is the exact failure they exist to prevent.
+**Correction to the first version of this section.** I attributed the logged-out state to that disconnect. That was wrong. The daemon had come back up in **`launched` mode** — gstack running its own browser with a fresh profile — rather than **`headed` mode**, which attaches to the user's real Chrome. It never had the user's logins to lose. `browse status` showing `Mode: launched` was the tell, and `connect --force-restart` produced `Connected to real Chrome` with both sessions intact.
+
+**The fix still stands on its own merits**: disconnecting a daemon you did not start does destroy someone's session, and six skills instructed exactly that. But the evidence for it was a different bug wearing the same symptom, and the plan should not claim otherwise.
 
 All six now say to leave the daemon running. Fixed in `3615829`.
 
@@ -362,7 +370,7 @@ Every ↪️ in this plan, and the task that closes it. **This table is the audi
 |---|---|---|---|---|
 | 1d | M1 §7.2 | `x-account-archive` plan still says `plugins/download/` | M4 task 27 | ✅ closed |
 | 12d | M2 §8.2 | Hindi `pg gyaan` capture never exercised end to end | M4 task 28 | ⬜ open |
-| 19d | M3 §9.1 | One real note per route never written | M4 task 25 | ⚠️ 6/8 routes verified; X and LinkedIn blocked on login |
+| 19d | M3 §9.1 | One real note per route never written | M4 task 25 | ✅ closed — 8/8 routes exercised; LinkedIn partial by its own design (§10.3) |
 
 ## 14. Log
 

@@ -80,9 +80,29 @@ OUTPUT_DIR:/absolute/path/to/output
 
 The marker must be last. Callers chain on it and must never reconstruct the path.
 
+## ⚠️ LinkedIn serves a truncated public view on post permalinks
+
+**Verified 2026-08-24, and it is not a session problem you can fix by logging in.** With a live LinkedIn session in the gstack browser — `/feed/` rendering fully, notifications present — a `/posts/…` permalink still returned the logged-out chrome ("Sign in · Join now") and a post body of **203 characters**, cut mid-thought at "There are now 63 of them!". The list of 63 was not on the page at all.
+
+What was checked, so you do not repeat it:
+
+| Attempt | Result |
+|---|---|
+| Session live? | Yes — `/feed/` signed in, notifications visible |
+| Auth modal blocking? | No — `.authwall` absent |
+| A "Show more" button? | Present, but it expands **comments**. Clicking added 48 characters, all of them replies. |
+| A separate expander for the body? | **None exists.** The only expanders are "Show more" and "See more comments". |
+| `/feed/update/urn:li:activity:<id>/` (the authenticated form) | Redirects to `/signup/cold-join` |
+
+**So: capture what is served, and say plainly that the body is truncated.** Report the character count and the last words captured. Do not present a 203-character fragment as the post.
+
+What *does* come through reliably: author name, relative date, reaction and comment counts, comment text, and the link-preview card. Often the card is the point of the post, and it survives.
+
+If the full body is genuinely needed, the reliable route is a human opening the post in their own browser session and copying it — not more automation.
+
 ## Failure modes worth naming
 
-- **A short post that should be long** — "…see more" was never expanded. Re-check before reporting.
+- **A short post that should be long** — either "…see more" was never expanded, or you have hit the permalink truncation above. Distinguish them: check whether a body expander exists at all before blaming the click.
 - **Author headline missing** — common on reshares; report it absent rather than substituting the reshared author's.
 - **Zero images on a post that clearly has them** — usually lazy-loading. Scroll the post into view, wait, re-collect.
 - **A login wall captured as content** — the failure this skill exists to prevent. If the text mentions signing in or joining LinkedIn, treat the capture as failed.

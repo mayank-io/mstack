@@ -202,3 +202,38 @@ def test_connect_reraises_unrelated_failures():
             raise _browse.BrowseError("browse binary not found")
     with pytest.raises(_browse.BrowseError, match="not found"):
         Boom().connect()
+
+
+# ---------------------------------------------------------------- wait
+
+class WaitSpy(_browse.BrowsePage):
+    def __init__(self, err=None):
+        self.err = err
+        self.calls = []
+
+    def _run(self, *args, **kwargs):
+        self.calls.append(args)
+        if self.err:
+            raise _browse.BrowseError(self.err)
+        return ""
+
+
+def test_wait_accepts_multiple_matches():
+    """`$B wait` refuses a non-unique selector; Playwright waits for the first
+    match. wait_for_selector("article") is how every X capture starts, and an X
+    status page always has several — so this rejected every real post."""
+    p = WaitSpy("`browse wait` failed: Selector matched multiple elements. "
+                "Be more specific or use @refs from 'snapshot'.")
+    asyncio.run(p.wait_for_selector("article"))  # must not raise
+
+
+def test_wait_still_raises_when_absent():
+    p = WaitSpy("`browse wait` failed: Timeout 20000ms exceeded")
+    with pytest.raises(_browse.BrowseError, match="never appeared"):
+        asyncio.run(p.wait_for_selector("nope"))
+
+
+def test_wait_passes_through_when_unique():
+    p = WaitSpy()
+    asyncio.run(p.wait_for_selector("article"))
+    assert p.calls[0][0] == "wait"

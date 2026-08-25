@@ -120,9 +120,24 @@ class BrowsePage:
                 pass  # best-effort, same as Playwright's soft timeout
 
     async def wait_for_selector(self, selector: str, timeout: int = 15000, **_):
+        """Wait for a selector, matching Playwright's semantics.
+
+        `$B wait` refuses a selector that matches more than one element
+        ("Selector matched multiple elements"). Playwright waits for the FIRST
+        match and does not care how many there are — and callers rely on that:
+        `wait_for_selector("article")` is how every X capture starts, and an X
+        status page always has several.
+
+        Multiple matches mean the selector is present, which is the entire
+        question being asked. Treating it as failure — and reporting it as
+        "selector never appeared", the opposite of what happened — sent callers
+        looking for a page-load problem that did not exist.
+        """
         try:
             self._run("wait", selector, timeout=max(5, int(timeout / 1000) + 5))
         except BrowseError as e:
+            if "matched multiple elements" in str(e):
+                return  # present, several times over — that is a pass
             raise BrowseError(f"selector never appeared: {selector} ({e})")
 
     async def wait_for_timeout(self, ms: int):
