@@ -119,9 +119,13 @@ Detection already sits in `fetch` — the extractor emits `caption_warnings`. Re
 
 **Proceeding on `fetch:blog-post`**, with `obsidian:defuddle` remaining its internal extractor. This removes the last third-party dependency from the clip chain and gives the fallback route the same `OUTPUT_DIR:` contract as every other route. Promoted out of "out of scope" because §4.4 makes it a live routing decision, not a future cleanup.
 
-## 6. Status legend
+## 6. Status legend and the deferral rule
 
-⬜ todo · 🟡 in progress · ✅ done · ⚠️ blocked
+⬜ todo · 🟡 in progress · ✅ done · ⚠️ blocked · ↪️ deferred
+
+**Nothing leaves a milestone unfinished without a named landing place.** When a task cannot be completed in its own milestone, it is marked ↪️ and a *"Deferred out of Milestone N"* subsection at the end of that milestone records what slipped, why, and which milestone will finish it. The receiving milestone gets a real numbered task, not a mention.
+
+A milestone's gate may pass with deferrals open — but the gate must say so, and the plan must be readable as: *for every ↪️ there is exactly one ⬜ downstream.* §13 is the standing index of every open deferral.
 
 ## 7. Milestone 1 — restore YouTube capture
 
@@ -149,7 +153,11 @@ Ships: `/youtube-to-obsidian:process` works again. Done in place in `mk`, becaus
 
 Historical design docs and completed plans in `mk:docs/` that reference `download:*` were **left unchanged** — they are records of what was true when written, and rewriting them would falsify the record.
 
-⚠️ **One dormant hazard, not fixed:** `mk:docs/plans/2026-08-16-x-account-archive.md` is an unexecuted implementation plan whose every path says `plugins/download/`. If anyone runs it as written, it will fail the same way task 1 did. Tracked in §12.
+### 7.2 Deferred out of Milestone 1
+
+| # | Status | What | Why deferred | Lands in |
+|---|---|---|---|---|
+| 1d | ↪️ | `mk:docs/plans/2026-08-16-x-account-archive.md` is an unexecuted implementation plan whose every path says `plugins/download/`. Run as written it fails exactly as task 1 did. | It is a *plan*, not shipped code — nothing is broken until someone executes it. Rewriting another plan's paths mid-milestone also risks changing its intent, which is the author's call. | **M4, task 27** |
 
 ## 8. Milestone 2 — YouTube runs through `clip`, knowledge becomes templates
 
@@ -176,7 +184,15 @@ Ships: `notes:clip <youtube-url>` works end to end with no `*-to-obsidian` plugi
 | Task 12 channel selection | 5/5 — `PG Gyaan`, `pggyaan`, `PG ज्ञान` → override; `Rick Astley`, `ARK Invest` → default |
 | Task 12 Hindi pipeline end to end | 🟡 **not run** — see below |
 
-🟡 **Task 12 is half-verified.** Template *selection* is proven deterministically against the patterns the template itself declares. What is not exercised is a real `pg gyaan` capture through Whisper `medium` in Hindi, with the IST→PST conversion and date wikilinks the template specifies. That needs a live Hindi video and a slow transcription; deferred to the first real pg-gyaan clip.
+🟡 **Task 12 is half-verified** — see §8.2.
+
+### 8.2 Deferred out of Milestone 2
+
+| # | Status | What | Why deferred | Lands in |
+|---|---|---|---|---|
+| 12d | ↪️ | Exercise a real `pg gyaan` capture end to end: Whisper `medium` in Hindi, IST→PST conversion, date wikilinks, Hindi preserved in quotes. | Template *selection* is proven deterministically (5/5, §8 gate). What is unproven is the Hindi transcription path, which needs a live Hindi video and a slow local Whisper run — too long to sit inside M2's loop, and it verifies template *content* rather than the architecture M2 exists to prove. | **M4, task 28** |
+
+The distinction matters: M2's job was to show that one skill plus template data replaces three orchestrators. That is proven. Whether one particular template's Hindi settings work is a content question, and it belongs with the other end-to-end route checks in M4.
 
 ### 8.1 Mutation testing — why the suite is trusted
 
@@ -219,8 +235,10 @@ Ships: one repo owns capture; no cross-marketplace dependency; one entry point.
 | 24 | ⬜ | Uninstall the four retired plugins locally, `/reload-plugins`, confirm no skill name 404s | — |
 | 25 | ⬜ | Verify: all eight `clip` routes resolve with the four `mk` plugins uninstalled | — |
 | 26 | ⬜ | Commit and push both repos; rebase, no merge commits, no Claude Code signature | — |
+| 27 | ⬜ | **Receives 1d (§7.2)** — repoint `mk:docs/plans/2026-08-16-x-account-archive.md` from `plugins/download/` to `plugins/fetch/`, or mark it superseded. Confirm with the author which; do not silently rewrite another plan's intent. | `mk:docs/plans/` |
+| 28 | ⬜ | **Receives 12d (§8.2)** — clip a real `pg gyaan` video end to end: channel override selected, Whisper `medium`/`hi`, IST→PST table present, dates as wikilinks, Hindi preserved in quotes | — |
 
-**Gate:** task 25 passes — the cross-marketplace dependency (§2.6) is gone by demonstration, not by assertion.
+**Gate:** task 25 passes — the cross-marketplace dependency (§2.6) is gone by demonstration, not by assertion — **and §13 is empty.** M4 is the last milestone, so it cannot defer anything onward: every ↪️ raised earlier either closes here or is explicitly moved to §12 as out of scope, with a reason.
 
 ## 11. Test specification for `clean.py` (task 7b)
 
@@ -293,7 +311,18 @@ uv run pytest plugins/notes/skills/clean-transcript/tests/ -v
 - The `edge-idea` collection system — designed, not built, tracked separately.
 - `fetch:vedic-chart` — reachable from `fetch:blog-post` and standalone, never a `clip` route.
 
-## 13. Log
+**Out of scope is not the same as deferred.** Items here are decided against; items in §13 are committed work with a named landing place. Moving something from §13 to §12 requires a stated reason.
+
+## 13. Open deferrals
+
+Every ↪️ in this plan, and the task that closes it. **This table is the audit: if a row has no receiving task, the work is lost.**
+
+| Ref | Raised in | What | Closes in | Status |
+|---|---|---|---|---|
+| 1d | M1 §7.2 | `x-account-archive` plan still says `plugins/download/` | M4 task 27 | ⬜ open |
+| 12d | M2 §8.2 | Hindi `pg gyaan` capture never exercised end to end | M4 task 28 | ⬜ open |
+
+## 14. Log
 
 | Date | Note |
 |---|---|
