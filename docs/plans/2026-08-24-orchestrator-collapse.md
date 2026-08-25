@@ -157,7 +157,7 @@ Historical design docs and completed plans in `mk:docs/` that reference `downloa
 
 | # | Status | What | Why deferred | Lands in |
 |---|---|---|---|---|
-| 1d | ↪️ | `mk:docs/plans/2026-08-16-x-account-archive.md` is an unexecuted implementation plan whose every path says `plugins/download/`. Run as written it fails exactly as task 1 did. | It is a *plan*, not shipped code — nothing is broken until someone executes it. Rewriting another plan's paths mid-milestone also risks changing its intent, which is the author's call. | **M4, task 27** |
+| 1d | ✅ | `mk:docs/plans/2026-08-16-x-account-archive.md` is an unexecuted implementation plan whose every path says `plugins/download/`. Run as written it fails exactly as task 1 did. | It is a *plan*, not shipped code — nothing is broken until someone executes it. Rewriting another plan's paths mid-milestone also risks changing its intent, which is the author's call. | **M4, task 27** |
 
 ## 8. Milestone 2 — YouTube runs through `clip`, knowledge becomes templates
 
@@ -245,14 +245,14 @@ Ships: one repo owns capture; no cross-marketplace dependency; one entry point.
 
 | # | Status | Task | Files |
 |---|---|---|---|
-| 20 | ⬜ | Update `notes/README.md` and `fetch/README.md` — the §4.1 raw rule, the §4.4 flow, and the §4.5 template/skill boundary | both plugins |
-| 21 | ⬜ | Remove the four plugins from `mk` `marketplace.json` and delete their directories (check for `.DS_Store` survivors — one blocked a deletion on 2026-08-24) | `mk` |
-| 22 | ⬜ | Bump `mk` `metadata.version` — the pre-commit hook rejects plugin changes without it | `mk:.claude-plugin/marketplace.json` |
-| 23 | ⬜ | Bump `mstack` `metadata.version` 0.6.0 → 0.7.0 | `mstack:.claude-plugin/marketplace.json` |
-| 24 | ⬜ | Uninstall the four retired plugins locally, `/reload-plugins`, confirm no skill name 404s | — |
+| 20 | ✅ | Update `notes/README.md` and `fetch/README.md` — the §4.1 raw rule, the §4.4 flow, and the §4.5 template/skill boundary | both plugins |
+| 21 | ✅ | Remove the four plugins from `mk` `marketplace.json` and delete their directories (check for `.DS_Store` survivors — one blocked a deletion on 2026-08-24) | `mk` |
+| 22 | ✅ | Bump `mk` `metadata.version` — the pre-commit hook rejects plugin changes without it | `mk:.claude-plugin/marketplace.json` |
+| 23 | ✅ | Bump `mstack` `metadata.version` 0.6.0 → 0.7.0 | `mstack:.claude-plugin/marketplace.json` |
+| 24 | 🟡 | Uninstall the four retired plugins locally, `/reload-plugins`, confirm no skill name 404s | — |
 | 25 | ⬜ | **Receives 19d (§9.1)** — clip one real URL per route with the four `mk` plugins uninstalled: X thread with images, LinkedIn post with a followed link, Notion site, Scribd doc, arXiv paper, PDF, plain article. Confirm images at original resolution, the LinkedIn recursion produces two linked notes, and no skill 404s. | — |
-| 26 | ⬜ | Commit and push both repos; rebase, no merge commits, no Claude Code signature | — |
-| 27 | ⬜ | **Receives 1d (§7.2)** — repoint `mk:docs/plans/2026-08-16-x-account-archive.md` from `plugins/download/` to `plugins/fetch/`, or mark it superseded. Confirm with the author which; do not silently rewrite another plan's intent. | `mk:docs/plans/` |
+| 26 | ✅ | Commit and push both repos; rebase, no merge commits, no Claude Code signature | — |
+| 27 | ✅ | **Closes 1d (§7.2)** — author chose to re-decide rather than repoint. §5.3 rewritten to `fetch:x-account` + `templates/x-account.md` + a `clip` route; M5's two tasks rewritten from a retired plugin to a template; 79 path references updated. The plan was **architecturally** invalid, not just path-stale — its vault half targeted a plugin that no longer exists. | `mk:docs/` |
 | 28 | ⬜ | **Receives 12d (§8.2)** — clip a real `pg gyaan` video end to end: channel override selected, Whisper `medium`/`hi`, IST→PST table present, dates as wikilinks, Hindi preserved in quotes | — |
 
 **Gate:** task 25 passes — the cross-marketplace dependency (§2.6) is gone by demonstration, not by assertion — **and §13 is empty.** M4 is the last milestone, so it cannot defer anything onward: every ↪️ raised earlier either closes here or is explicitly moved to §12 as out of scope, with a reason.
@@ -336,7 +336,7 @@ Every ↪️ in this plan, and the task that closes it. **This table is the audi
 
 | Ref | Raised in | What | Closes in | Status |
 |---|---|---|---|---|
-| 1d | M1 §7.2 | `x-account-archive` plan still says `plugins/download/` | M4 task 27 | ⬜ open |
+| 1d | M1 §7.2 | `x-account-archive` plan still says `plugins/download/` | M4 task 27 | ✅ closed |
 | 12d | M2 §8.2 | Hindi `pg gyaan` capture never exercised end to end | M4 task 28 | ⬜ open |
 | 19d | M3 §9.1 | One real note per route never written | M4 task 25 | ⬜ open |
 

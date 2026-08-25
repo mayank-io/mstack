@@ -20,8 +20,13 @@ B="$HOME/.claude/skills/gstack/browse/dist/browse"
                     # daemon and kills the headed session
 "$B" goto "<url>"
 "$B" js '<expression>'
-"$B" disconnect
 ```
+
+**Do NOT `disconnect` when done.** `browse disconnect` tears down the daemon and
+the logged-in sessions with it. Verified 2026-08-24: a disconnect after one
+capture left the browser logged out of both X and LinkedIn, so the next capture
+returned a login wall that reads as a short post. Leave the daemon running —
+`connect` is safe to call again, and only whoever started it should close it.
 
 **Never launch a headless browser.** Not `headless=True`, not `--headless`, not a
 fresh `chromium.launch()`. If gstack is unavailable, stop and say so rather than
