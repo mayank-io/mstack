@@ -1,14 +1,15 @@
 # Notes Plugin
 
-Capture external sources into a notes vault.
+Capture external sources into an Obsidian vault. **`clip` is the single entry point** — hand it a URL and it routes, fetches, formats and files.
 
 ## Skills
 
-### `clip`
-
-Routes a URL to the right extractor and note-writer, so you type one thing regardless of source.
-
-**Usage:**
+| Skill | Role |
+|---|---|
+| `clip` | URL → note. The only skill you invoke directly. |
+| `clean-transcript` | raw transcript → readable verbatim Markdown, guaranteed by a script |
+| `create` | write a note into the current vault; owns frontmatter, folder, filename, links |
+| `save-local-file` | a file already on disk → note, archiving the file into attachments |
 
 ```
 clip https://x.com/user/status/123
@@ -16,36 +17,81 @@ clip https://youtube.com/watch?v=abc
 /notes:clip https://example.com/article  tag it to project X
 ```
 
-**Routing:**
+## How clip works
 
-| Source | Routes to | Writes the note? |
-|--------|-----------|------------------|
-| X / Twitter | `x-to-obsidian:save` | yes |
-| YouTube | `youtube-to-obsidian:process` | yes |
-| LinkedIn | `linkedin-to-obsidian:save` | yes |
-| Notion site | `fetch:notion-public-site` | extract only |
-| Scribd | `fetch:scribd-document` | extract only |
-| arXiv / alphaXiv | `fetch:alphaxiv-paper` | extract only |
-| PDF (incl. Drive) | `curl` + Read | extract only |
-| anything else | `obsidian:defuddle` | extract only |
+One flow, one conditional, for every route:
 
-Extract-only routes are followed by `notes:create` to write the note.
+```
+1. route on host        ──▶  fetch:<source>          (curl, for PDF)
+2. read its OUTPUT_FILE: / OUTPUT_DIR: final line
+3. select templates/<source>.md  + templates/channels/<name>.md if one matches
+4. if the content is a transcript  ──▶  notes:clean-transcript
+5. fill the template
+6. notes:create                    (or notes:save-local-file, for PDF)
+```
+
+| Source | Fetch with | Template |
+|---|---|---|
+| YouTube | `fetch:youtube-transcript` | `youtube.md` (+ channel override) |
+| X / Twitter | `fetch:x-post` | `x.md` |
+| LinkedIn | `fetch:linkedin-post` | `linkedin.md` |
+| Notion site | `fetch:notion-public-site` | `notion.md` |
+| Scribd | `fetch:scribd-document` | `article.md` |
+| arXiv / alphaXiv | `fetch:alphaxiv-paper` | `paper.md` |
+| PDF (incl. Drive) | `curl` → `notes:save-local-file` | — |
+| anything else | `fetch:blog-post` | `article.md` |
 
 ## Design
 
-**The clip skill is a router.** It deliberately does not know vault conventions — folder layout, frontmatter, tags, daily-note updates all belong to the downstream skill. That keeps the routing table stable while vaults differ.
+### There is no per-source skill, and there should never be one
 
-What the router *does* own is the set of source-specific traps that have produced bad captures:
+An earlier design added `notes:youtube`, `notes:x` and `notes:linkedin`. Sorting what those "recipes" actually contained showed every element already had a home:
 
-- **Browser sources use gstack browse, never a fresh Playwright session** — otherwise you silently capture logged-out content.
-- **X virtualises its DOM** — a single pass loses posts; harvest across a scroll loop.
-- **YouTube caption warnings catch omitted numbers, not corrupted ones** — run a corruption scan and re-transcribe any figure a summary will quote.
+| What it did | Where it belongs |
+|---|---|
+| Thread detection, image download, Whisper fallback | the `fetch:*` skill |
+| Ticker wikilinks, daily-note update, folder, filename | `notes:create` |
+| Recursion into shared content | `clip` — general, not a LinkedIn trait |
+| Transcript cleaning and corruption scan | `notes:clean-transcript` |
+| Frontmatter extras, body structure, summary sections | **a template** |
+
+The three recipes were three copies of *"read fetch output, fill a shape, call create"* differing only in the shape. So shape moved to `templates/` and the skills disappeared.
+
+### Templates describe shape, never sequence
+
+**The boundary that keeps this design from decaying.** A template may carry declarative settings — channel match patterns, a Whisper model, a language, frontmatter fields, required tags. If one starts saying *"then run X, then check Y"*, it has outgrown the format and that logic belongs in `clip` or a `fetch:*` skill.
+
+Nothing lints this. `templates/channels/pg-gyaan.md` is already 213 lines and specifies tool settings; it stays a template because it never sequences a call. A channel template **overrides** its source template entirely — it does not merge.
+
+### The layer split
+
+`fetch:*` retrieves and returns **raw**. `notes:*` writes into a vault. Cleaning is opinionated and lossy — paragraph breaks, chapter headings, noise removal — so it belongs to the caller, not the fetcher. Raw can always be re-cleaned; cleaned can never be un-cleaned.
+
+## Traps this plugin encodes
+
+Each one has produced a bad capture:
+
+- **Browser sources use gstack, never a fresh Playwright session** — a logged-out capture looks like a successful short one.
+- **`$B js` does not await promises.** Page JavaScript must be synchronous; drive waits from Python. An in-page `await` silently returns nothing, which reads as "no results".
+- **X virtualises its DOM** — a single pass loses posts; accumulate across a scroll loop keyed by status id.
+- **Images at `name=orig`, not `name=large`** — a downscaled chart is unreadable at the point it matters.
+- **YouTube caption warnings catch *omitted* numbers, not *corrupted* ones.** `$und00` for `$1,050` reads as authoritative. `clean-transcript` scans for the second class; anything a summary will quote gets re-transcribed from audio.
 - **Notion hides content in collapsed toggles** — a page that is all headings with empty bodies is not a short page, it is an unexpanded one.
+- **LinkedIn truncates behind "…see more"** — expand before reading.
 - **Screenshot-heavy pages carry their content in the images** — download *and read* them.
 - **PDFs get archived locally**, because the link will rot.
+- **Recursion needs a cycle guard.** Two posts quoting each other loop forever; normalise URLs before comparing and cap depth.
 
 ## Dependencies
 
-Note-writing lives in this plugin (`notes:create`, `notes:save-local-file`). Source-specific formatters live in the `mk-claude-code-plugins` marketplace (`x-to-obsidian`, `youtube-to-obsidian`, `linkedin-to-obsidian`); extraction lives in this marketplace's `fetch` plugin, plus `obsidian:defuddle`.
+Everything `clip` routes to lives in this marketplace: `fetch:*` for extraction, this plugin for writing. There is no cross-marketplace dependency.
 
-If a required skill is missing the clip skill reports it and stops, rather than half-finishing.
+If a required skill is missing, `clip` reports it and stops rather than half-finishing.
+
+## Tests
+
+```bash
+uv run --group dev pytest plugins/notes/skills/clean-transcript/tests/ -v
+```
+
+`clean.py` is the only code here; everything else is skill prose and template data. Its suite is mutation-tested — if you change it, break it deliberately and confirm a test fails. A suite that has never failed proves nothing.

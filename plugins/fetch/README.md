@@ -32,9 +32,36 @@ Emit exactly one such line, last. Human-readable progress may precede it and is 
 
 **One documented exception:** `fetch:vedic-chart` streams the chart JSON and ASCII to stdout when no `output_dir` is given — there, stdout *is* the product. It emits `OUTPUT_DIR:` only when writing files.
 
+### Return raw
+
+A fetch skill retrieves; it does not shape. Cleaning is opinionated and lossy — paragraph breaks, chapter headings, noise-marker removal — and different callers want different things. **Raw can always be re-cleaned; cleaned can never be un-cleaned.** `fetch:youtube-transcript` therefore returns timestamped raw text, and `notes:clean-transcript` cleans it.
+
+The line is *fidelity* versus *readability*. Re-transcribing a window because the caption dropped a figure belongs here — it makes the content more faithful to the source. Inserting paragraph breaks does not.
+
+### Never reach into another plugin
+
+A caller must invoke a `fetch:*` skill **as a skill**, never locate its scripts by path. Only the skill knows its own `${CLAUDE_PLUGIN_ROOT}`.
+
+`youtube-to-obsidian` once globbed `~/.claude/plugins/*/plugins/download/scripts/` for the extractor. The rename to `fetch` broke it — and substituting the new name would not have helped, because a *directory*-source marketplace keeps its scripts in the source repo, nowhere under `~/.claude/plugins/`.
+
 ### Why it matters
 
 `notes:clip` routes a URL to a `fetch:*` skill and then hands the result to `notes:create` or `notes:save-local-file`. Without a uniform result line the router has to guess where output landed — which is how paths get hand-computed and quietly wrong.
+
+## Browser work
+
+Everything browser-driven goes through the **gstack browser** via `scripts/_browse.py`, which exposes a Playwright-shaped API (`goto`, `wait_for_selector`, `evaluate`, `wait_for_timeout`) over `$B`. Never `mcp__playwright__*`: a fresh session is logged out and returns login walls that look like successful short captures.
+
+Two constraints the adapter enforces, both learned the hard way:
+
+- **Page JavaScript must be synchronous.** `$B js` returns before a promise resolves, so an in-page `await` loses its result — and `JSON.stringify` of a pending promise yields `{}`, which reads as a successful empty result. `evaluate()` now refuses async input rather than returning nothing. Drive loops from Python with `wait_for_timeout` between synchronous `evaluate` calls.
+- **Pass arguments, do not interpolate them.** `evaluate(js, {...})` applies arguments properly; string-interpolating a value into the JavaScript breaks on the first quote it contains.
+
+The adapter attaches to an already-running daemon rather than failing, and **only disconnects one it started** — closing the user's browser would drop the tabs, cookies and logins that make gstack worth using.
+
+```bash
+uv run --group dev pytest plugins/fetch/scripts/tests/ -v
+```
 
 ## Commands
 
