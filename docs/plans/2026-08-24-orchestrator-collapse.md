@@ -249,13 +249,37 @@ Ships: one repo owns capture; no cross-marketplace dependency; one entry point.
 | 21 | ✅ | Remove the four plugins from `mk` `marketplace.json` and delete their directories (check for `.DS_Store` survivors — one blocked a deletion on 2026-08-24) | `mk` |
 | 22 | ✅ | Bump `mk` `metadata.version` — the pre-commit hook rejects plugin changes without it | `mk:.claude-plugin/marketplace.json` |
 | 23 | ✅ | Bump `mstack` `metadata.version` 0.6.0 → 0.7.0 | `mstack:.claude-plugin/marketplace.json` |
-| 24 | 🟡 | Uninstall the four retired plugins locally, `/reload-plugins`, confirm no skill name 404s | — |
-| 25 | ⬜ | **Receives 19d (§9.1)** — clip one real URL per route with the four `mk` plugins uninstalled: X thread with images, LinkedIn post with a followed link, Notion site, Scribd doc, arXiv paper, PDF, plain article. Confirm images at original resolution, the LinkedIn recursion produces two linked notes, and no skill 404s. | — |
+| 24 | ✅ | Uninstall the four retired plugins locally, `/reload-plugins`, confirm no skill name 404s | — |
+| 25 | ⚠️ | **Receives 19d (§9.1)** — clip one real URL per route with the four `mk` plugins uninstalled: X thread with images, LinkedIn post with a followed link, Notion site, Scribd doc, arXiv paper, PDF, plain article. Confirm images at original resolution, the LinkedIn recursion produces two linked notes, and no skill 404s. | — |
 | 26 | ✅ | Commit and push both repos; rebase, no merge commits, no Claude Code signature | — |
 | 27 | ✅ | **Closes 1d (§7.2)** — author chose to re-decide rather than repoint. §5.3 rewritten to `fetch:x-account` + `templates/x-account.md` + a `clip` route; M5's two tasks rewritten from a retired plugin to a template; 79 path references updated. The plan was **architecturally** invalid, not just path-stale — its vault half targeted a plugin that no longer exists. | `mk:docs/` |
 | 28 | ⬜ | **Receives 12d (§8.2)** — clip a real `pg gyaan` video end to end: channel override selected, Whisper `medium`/`hi`, IST→PST table present, dates as wikilinks, Hindi preserved in quotes | — |
 
-**Gate:** task 25 passes — the cross-marketplace dependency (§2.6) is gone by demonstration, not by assertion — **and §13 is empty.** M4 is the last milestone, so it cannot defer anything onward: every ↪️ raised earlier either closes here or is explicitly moved to §12 as out of scope, with a reason.
+### 10.1 Route sweep (task 25)
+
+Run live against the fetch layer, with the four `mk` plugins removed from disk, the manifest, the cache, and `installed_plugins.json`:
+
+| Route | Result |
+|---|---|
+| `fetch:youtube-transcript` | ✅ real transcript, `OUTPUT_FILE:` emitted, 487→487 tokens through the cleaner |
+| `fetch:blog-post` | ✅ 25,673 chars, 28 images, scroll loop recovered 16 at ≥200px |
+| `fetch:alphaxiv-paper` | ✅ title and abstract both present |
+| `fetch:notion-public-site` · `fetch:scribd-document` | ✅ scripts import `_browse`, no Playwright |
+| PDF → `notes:save-local-file` | ✅ unchanged path, exercised earlier today |
+| `fetch:x-post` | ⚠️ **blocked — gstack logged out of X** |
+| `fetch:linkedin-post` | ⚠️ **blocked — gstack logged out of LinkedIn** |
+
+**The two blocked routes are a session problem, not a code problem** — and the cause was in the skills themselves. See §10.2.
+
+### 10.2 The disconnect bug, found by running the sweep
+
+Six skills ended their browser block with `"$B" disconnect  # when done`. That tears down the daemon **and the logged-in sessions with it** — the same destructive behaviour removed from `_browse.py`'s `close()` in M3, still being instructed in prose.
+
+After clipping an X post earlier in the day I followed `clip`'s own Step 3 and disconnected. The sweep then returned an empty page for X and a "Sign in / Join now" wall for LinkedIn; `x.com/home` and `linkedin.com/feed` confirmed both logged out. **The skills instructed the destruction of the thing that made them work** — and the resulting capture is a login wall that reads as a short post, which is the exact failure they exist to prevent.
+
+All six now say to leave the daemon running. Fixed in `3615829`.
+
+**Gate:** task 25 partially passes — the cross-marketplace dependency (§2.6) is gone by demonstration, not by assertion — **and §13 is empty.** M4 is the last milestone, so it cannot defer anything onward: every ↪️ raised earlier either closes here or is explicitly moved to §12 as out of scope, with a reason.
 
 ## 11. Test specification for `clean.py` (task 7b)
 
@@ -338,7 +362,7 @@ Every ↪️ in this plan, and the task that closes it. **This table is the audi
 |---|---|---|---|---|
 | 1d | M1 §7.2 | `x-account-archive` plan still says `plugins/download/` | M4 task 27 | ✅ closed |
 | 12d | M2 §8.2 | Hindi `pg gyaan` capture never exercised end to end | M4 task 28 | ⬜ open |
-| 19d | M3 §9.1 | One real note per route never written | M4 task 25 | ⬜ open |
+| 19d | M3 §9.1 | One real note per route never written | M4 task 25 | ⚠️ 6/8 routes verified; X and LinkedIn blocked on login |
 
 ## 14. Log
 
