@@ -6,7 +6,7 @@
   },
   "metadata": {
     "description": "Mayank's stack of Claude Code plugins for development and continuous improvement workflows",
-    "version": "0.9.0-rc1",
+    "version": "0.9.0",
     "pluginRoot": "./plugins"
   },
   "plugins": [

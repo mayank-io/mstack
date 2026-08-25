@@ -27,7 +27,7 @@ Then enable individual plugins:
 
 Analyze your Claude Code usage and turn one-off work into reusable patterns.
 
-| Command | What it does |
+| Skill | What it does |
 |---|---|
 | `/ccimprove:surface-usage-patterns` | Scan all sessions in `~/.claude/projects/` and surface candidates for skills, plugins, agents, and CLAUDE.md additions |
 | `/ccimprove:make-repeatable` | Analyze the current conversation and recommend whether to codify it as a skill or a plugin, then build it |
@@ -37,7 +37,7 @@ Analyze your Claude Code usage and turn one-off work into reusable patterns.
 
 Iterative reviews, doc conventions, and feedback loops for serious engineering work.
 
-| Command | What it does |
+| Skill | What it does |
 |---|---|
 | `/dev:code-review-iterative` | Up to 4 review-fix iterations with 3 parallel reviewer agents (PE, Sr SDE, QA), diminishing fix thresholds |
 | `/dev:design-review-iterative` | Same shape, applied to design documents (PE, Sr SDE, Domain Expert) |
@@ -109,7 +109,8 @@ The layer beneath `notes`. Each skill gets content out of one source and knows n
 | Skill | What it does |
 |---|---|
 | `fetch:youtube-transcript` | Transcript + metadata + chapters + speakers from a YouTube URL (persistent Chrome profile, Whisper fallback, caption-integrity verification) |
-| `fetch:x-post` | Single tweet, full thread, or X Article — auto-detects threads and downloads images |
+| `fetch:x-post` | Single tweet, full thread, or X Article — auto-detects threads, walks back to the thread root, downloads images at original resolution |
+| `fetch:linkedin-post` | Post text, author, metrics, comments and attachments — expands the "… more" control and filters attachments from page furniture |
 | `fetch:blog-post` | Article to self-contained Markdown + images, recovering the lazy-loaded ones Defuddle drops |
 | `fetch:notion-public-site` | Crawl a public Notion site, save every page as Markdown with wikilinks and embedded images |
 | `fetch:scribd-document` | Pull every page of a Scribd document as zero-padded `.jpg` files via embed view |
@@ -120,7 +121,7 @@ The layer beneath `notes`. Each skill gets content out of one source and knows n
 
 ## Conventions
 
-- **Wrapper → SKILL pattern.** Every command is a thin wrapper that invokes its `<plugin>:<skill-name>` skill via the Skill tool. The skill holds the implementation. This means natural-language triggers ("clean up these permissions", "make this repeatable") activate the same flow as the explicit `/command`.
+- **Skills only — no command wrappers.** A skill is both slash-invocable (`/notes:clip`) and naturally triggered by its description, so it needs no companion command. Until 0.9.0 every skill had a same-named wrapper in `commands/` whose entire body was *"Invoke the `<plugin>:<name>` skill via the Skill tool."* Both registered the same `/plugin:name`, so all 23 appeared **twice** in the slash menu — and the two descriptions drifted apart. Removing them cut the menu from 74 entries to 51 and, because the skill's own description is longer than the wrapper's, made the remaining entries more informative rather than less.
 - **No Claude attribution in commits.** See `~/.claude/CLAUDE.md`.
 - **Docs live elsewhere.** Design docs and implementation plans for this marketplace live in the sibling repo `mstack-docs/`, not in this repo.
 
@@ -144,7 +145,6 @@ Each plugin follows the standard layout:
 ```
 <plugin>/
 ├── .claude-plugin/plugin.json
-├── commands/<name>.md      # thin wrappers
 ├── skills/<name>/SKILL.md  # implementations
 ├── hooks/                  # (dev only)
 ├── scripts/                # (dev, fetch)
