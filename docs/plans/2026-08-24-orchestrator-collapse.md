@@ -157,17 +157,38 @@ Ships: `notes:clip <youtube-url>` works end to end with no `*-to-obsidian` plugi
 
 | # | Status | Task | Files |
 |---|---|---|---|
-| 5 | ⬜ | Extract `templates/default.md` → `notes/templates/youtube.md` and `pg-gyaan.md` → `notes/templates/channels/pg-gyaan.md`; strip anything that sequences tool calls per §4.5 | `mstack:plugins/notes/templates/` |
-| 6 | ⬜ | Create `notes:clean-transcript` from `youtube-transcript-cleaner` — drop the stuttering name; own the corruption scan (`$und00`, `a,50`, `%` with no preceding digit) that `clip` §3 already mandates | `mstack:plugins/notes/skills/clean-transcript/SKILL.md` |
-| 7a | ⬜ | **Prerequisite:** stand up a Python test harness in `mstack` — none exists today (no `pyproject.toml`, no `uv.lock`, no `tests/`), so §11.6 is currently unrunnable | `mstack:pyproject.toml` |
-| 7b | ⬜ | Ship the cleaner as a deterministic script, not prose — guarantees verbatim by construction (spec in §11) | `.../clean-transcript/scripts/clean.py` |
+| 5 | ✅ | Extract `templates/default.md` → `notes/templates/youtube.md` and `pg-gyaan.md` → `notes/templates/channels/pg-gyaan.md`; strip anything that sequences tool calls per §4.5 | `mstack:plugins/notes/templates/` |
+| 6 | ✅ | Create `notes:clean-transcript` from `youtube-transcript-cleaner` — drop the stuttering name; own the corruption scan (`$und00`, `a,50`, `%` with no preceding digit) that `clip` §3 already mandates | `mstack:plugins/notes/skills/clean-transcript/SKILL.md` |
+| 7a | ✅ | **Prerequisite:** stand up a Python test harness in `mstack` — none exists today (no `pyproject.toml`, no `uv.lock`, no `tests/`), so §11.6 is currently unrunnable | `mstack:pyproject.toml` |
+| 7b | ✅ | Ship the cleaner as a deterministic script, not prose — guarantees verbatim by construction (spec in §11) | `.../clean-transcript/scripts/clean.py` |
 | 8 | ✅ | Implement §5.1 decision A — caption remediation invoked from `fetch:youtube-transcript` (pulled forward into M1; it was the only fix for task 2 that did not reintroduce path-reaching) | `mstack:plugins/fetch/skills/youtube-transcript/SKILL.md` |
-| 9 | ⬜ | Make `notes:create` conventions explicit rather than delegated: daily-note append and ticker wikilinking currently rely on the vault's `CLAUDE.md` being read and obeyed, which did not fire during the 2026-08-24 X clip | `mstack:plugins/notes/skills/create/SKILL.md` |
-| 10 | ⬜ | Teach `clip` the flow in §4.4 — template column, the transcript conditional, template selection with channel override | `mstack:plugins/notes/skills/clip/SKILL.md` |
-| 11 | ⬜ | Verify: `notes:clip <youtube-url>` end to end; confirm cleaned text is token-identical to raw apart from deliberate removals | — |
-| 12 | ⬜ | Verify: a `pg gyaan` URL selects the channel override and applies its Whisper settings | — |
+| 9 | ✅ | Make `notes:create` conventions explicit rather than delegated: daily-note append and ticker wikilinking currently rely on the vault's `CLAUDE.md` being read and obeyed, which did not fire during the 2026-08-24 X clip | `mstack:plugins/notes/skills/create/SKILL.md` |
+| 10 | ✅ | Teach `clip` the flow in §4.4 — template column, the transcript conditional, template selection with channel override | `mstack:plugins/notes/skills/clip/SKILL.md` |
+| 11 | ✅ | Verify: `notes:clip <youtube-url>` end to end; confirm cleaned text is token-identical to raw apart from deliberate removals | — |
+| 12 | 🟡 | Verify: a `pg gyaan` URL selects the channel override and applies its Whisper settings | — |
 
-**Gate:** task 7b's suite green (§11), task 11's token-identity check passes on a real video, and task 12 selects the override.
+**Gate:** ✅ passed, with one partial.
+
+| Check | Result |
+|---|---|
+| Task 7b suite (§11) | 29/29 green, and **mutation-tested** — see §8.1 |
+| Task 11 token identity, real video | 487 raw tokens → 487 clean tokens, **identical** |
+| Task 12 channel selection | 5/5 — `PG Gyaan`, `pggyaan`, `PG ज्ञान` → override; `Rick Astley`, `ARK Invest` → default |
+| Task 12 Hindi pipeline end to end | 🟡 **not run** — see below |
+
+🟡 **Task 12 is half-verified.** Template *selection* is proven deterministically against the patterns the template itself declares. What is not exercised is a real `pg gyaan` capture through Whisper `medium` in Hindi, with the IST→PST conversion and date wikilinks the template specifies. That needs a live Hindi video and a slow transcription; deferred to the first real pg-gyaan clip.
+
+### 8.1 Mutation testing — why the suite is trusted
+
+29/29 green on first run is not evidence; a suite that has never failed proves nothing. Three deliberate breakages:
+
+| Mutation | Caught? |
+|---|---|
+| Capitalise the first word (i.e. "fix grammar") | ✅ 3 tests fail, including `test_verbatim_invariant` |
+| Chapter boundary `>=` → `>` (start-exclusive) | ✅ `test_chapter_boundary_inclusive` fails |
+| Drop the noise-only-segment guard | ❌ **survived** |
+
+The third exposed a hole in the test, not in the code. `test_noise_only_line_dropped` compared token streams, and a `\S+` tokeniser normalises away the double space an empty segment leaves. Tightened to assert the exact body (`"alpha beta\n"`) plus the parse output directly; the mutation now fails it. **The gap was in the assertion, and only mutation testing surfaced it.**
 
 ## 9. Milestone 3 — remaining sources
 
@@ -277,4 +298,6 @@ uv run pytest plugins/notes/skills/clean-transcript/tests/ -v
 | Date | Note |
 |---|---|
 | 2026-08-24 | Plan created after `notes:clip` was exercised on an X post and the survey found `youtube-to-obsidian:process` broken by the `download`→`fetch` rename. |
+| 2026-08-24 | M1 complete — `mstack 67d7219` (0.6.1), `mk 094def0` (1.2.1). Task 8 pulled forward: no fix for task 2 avoided path-reaching except moving caption remediation into `fetch`. |
+| 2026-08-24 | M2 complete but for the Hindi end-to-end check (§8, task 12). Templates migrated unchanged — both were already shape + declarative settings, so §4.5 required no edits to them. |
 | 2026-08-24 | Rewritten. First draft added `notes:youtube` / `notes:x` / `notes:linkedin` as per-source skills. Sorting their contents (§4.2) showed every element already had a home, so the three skills were dropped and per-source knowledge became template data — keeping `clip` the single entry point. Milestone 3 shrank accordingly; `fetch:linkedin-post` and the `blog-post` routing decision were promoted in. |

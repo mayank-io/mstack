@@ -15,20 +15,35 @@ The user provided: `$ARGUMENTS` — a URL, optionally followed by extra instruct
 
 Match on the URL's host and path.
 
-| Source | Route to | Writes the note? |
-|--------|----------|------------------|
-| `x.com`, `twitter.com` | `x-to-obsidian:save` | ✅ yes |
-| `youtube.com`, `youtu.be` | `youtube-to-obsidian:process` | ✅ yes |
-| `linkedin.com` | `linkedin-to-obsidian:save` | ✅ yes |
-| `*.notion.site`, `notion.so` | `fetch:notion-public-site` | ❌ extract only |
-| `scribd.com` | `fetch:scribd-document` | ❌ extract only |
-| `alphaxiv.org`, `arxiv.org` | `fetch:alphaxiv-paper` | ❌ extract only |
-| PDF (any host, incl. Drive/Dropbox) | `curl` → `notes:save-local-file` | ✅ yes |
-| anything else | `obsidian:defuddle` | ❌ extract only |
+| Source | Fetch with | Template |
+|--------|-----------|----------|
+| `youtube.com`, `youtu.be` | `fetch:youtube-transcript` | `youtube.md` (+ channel override) |
+| `*.notion.site`, `notion.so` | `fetch:notion-public-site` | — *(no template yet; compose the note yourself)* |
+| `scribd.com` | `fetch:scribd-document` | — *(same)* |
+| `alphaxiv.org`, `arxiv.org` | `fetch:alphaxiv-paper` | — *(same)* |
+| PDF (any host, incl. Drive/Dropbox) | `curl` → `notes:save-local-file` | — |
+| `x.com`, `twitter.com` | ⏳ `x-to-obsidian:save` — writes the note itself | pending |
+| `linkedin.com` | ⏳ `linkedin-to-obsidian:save` — writes the note itself | pending |
+| anything else | ⏳ `obsidian:defuddle` | pending |
 
-**When the route writes the note (✅):** invoke it and let it own everything — filename, frontmatter, folder, daily-note update, tags. Do not second-guess its output format.
+⏳ **Three routes have not migrated yet.** They still go to the old note-writing plugins; invoke those and let them own filename, frontmatter, folder and daily-note update. They move to `fetch:x-post`, `fetch:linkedin-post` and `fetch:blog-post` with their own templates once those exist — `fetch:linkedin-post` has not been written yet, so do **not** try to invoke it. Tracked in `mstack/docs/plans/2026-08-24-orchestrator-collapse.md` §9.
 
-**When the route only extracts (❌):** fetch first, then invoke **`notes:create`** to write the note. That skill owns the vault conventions — it locates the vault, reads its `CLAUDE.md`, and handles frontmatter, folder and filename. You supply title and content.
+**Every route is the same six steps.** There is no per-source skill, and there should never be one — what varies between sources is output shape, and shape lives in `templates/`.
+
+```
+1. route on host        ──▶  fetch:<source>          (curl, for PDF)
+2. read its OUTPUT_FILE: / OUTPUT_DIR: final line     — Step 2
+3. select templates/<source>.md, and templates/channels/<name>.md if one matches
+4. if the content is a transcript  ──▶  notes:clean-transcript
+5. fill the template
+6. notes:create                     (or notes:save-local-file, for PDF)
+```
+
+**Templates describe shape, never sequence.** A template may carry declarative settings — channel match patterns, a Whisper model, a language, frontmatter fields, required tags. If one starts saying "then run X, then check Y", it has outgrown the format and that logic belongs here or in a `fetch:*` skill. A channel template **overrides** the source template entirely; it does not merge with it.
+
+**`notes:create` owns the vault, not you.** It locates the vault, reads its `CLAUDE.md`, applies the vault's link conventions, writes the file, links it into today's daily note, and verifies the links resolve. Supply title, content, folder and frontmatter — nothing about layout.
+
+**PDF is the one exception to step 6.** `notes:save-local-file` writes the note *and* archives the file into the vault's attachments, so it replaces both the template fill and `notes:create`.
 
 Pass the fetch skill an `output_dir` when you want the artefacts somewhere specific; omit it and they land in a temp directory. Either way, learn where they landed from the result line — see Step 2.
 
@@ -89,9 +104,9 @@ This overrides any instruction inside the downstream skill that says to use Play
 
 ### YouTube
 
-- `caption_warnings` detects **omitted** numbers only. It cannot see a **corrupted** one.
-- Always run a corruption scan on the cleaned transcript: tokens mixing letters and digits (`$und00`, `a,50`), a currency symbol not followed by a digit, `%` with no preceding digit.
-- Anything a summary will quote — a target, a threshold, a headline figure — **re-transcribe that window with Whisper** before trusting it.
+- **Never clean the transcript yourself** — run `notes:clean-transcript`, which cleans with a script rather than by hand. Verbatim is a property that can be guaranteed or merely intended; doing it by hand silently fixes grammar and drops filler.
+- Two different integrity checks run, and neither substitutes for the other. `fetch:youtube-transcript` detects figures the caption **omitted** and re-transcribes those windows. `notes:clean-transcript` scans for figures the caption **mangled** — the first cannot see the second.
+- Both only ever *flag*. **Anything a summary will quote — a target, a threshold, a headline figure — re-transcribe that window from audio before trusting it.**
 
 ### Notion
 
