@@ -3,6 +3,12 @@
 Scribd Document Extractor
 Downloads all page images from a Scribd document via its embed view.
 
+Rendering goes through _browse.browse_page(), which drives the gstack browser in
+HEADED mode — the one attached to the user's real Chrome, holding their logins.
+Do not swap this for Playwright or any freshly launched browser: a logged-out
+profile gets Scribd's paywall/login view, which renders as a short, valid-looking
+page, so a gated capture is indistinguishable from a short document.
+
 Usage: python3 scribd_extractor.py <scribd_url> [output_dir]
 Example: python3 scribd_extractor.py "https://www.scribd.com/document/123456789/Sample-Document-Title" ./output
 """
@@ -44,7 +50,9 @@ async def get_total_pages(page) -> int:
             return 0;
         }
     """)
-    return count
+    # `or 0`: an unparseable/empty result must degrade to the "unknown count"
+    # branch the caller already handles, not blow up on `None > 0` later.
+    return count or 0
 
 
 def extract_page_num(url: str) -> int:
@@ -161,13 +169,13 @@ async def extract_scribd_images(url: str, output_dir: str = "./scribd_output"):
     # Download all images
     print(f"Downloading {len(urls)} images to {output_dir}...", flush=True)
     async with httpx.AsyncClient(timeout=30) as client:
-        for url in urls:
-            page_num = extract_page_num(url)
+        for img_url in urls:
+            page_num = extract_page_num(img_url)
             filename = os.path.join(output_dir, f"page_{page_num:04d}.jpg")
             if os.path.exists(filename):
                 continue
             try:
-                r = await client.get(url)
+                r = await client.get(img_url)
                 r.raise_for_status()
                 with open(filename, "wb") as f:
                     f.write(r.content)

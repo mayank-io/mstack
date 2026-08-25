@@ -132,11 +132,17 @@ class BrowsePage:
         current = self.mode()
         if current != "headed":
             raise BrowseError(
-                f"gstack is in '{current}' mode, not 'headed', after a forced "
-                f"restart. A launched-mode daemon uses a fresh profile with no "
-                f"logins, so every gated page returns a login wall that reads "
-                f"as a short page. Refusing to continue — a logged-out capture "
-                f"is worse than none, because it looks fine."
+                f"gstack is in '{current}' mode, not 'headed', even after a "
+                f"forced restart. A launched-mode daemon uses a fresh profile "
+                f"with no logins, so every gated page returns a login wall that "
+                f"reads as a short page rather than an error.\n\n"
+                f"Cause: gstack attaches to a Chromium running with remote "
+                f"debugging. If GStack Browser is not open, there is nothing to "
+                f"attach to and it silently falls back to launched.\n\n"
+                f"Fix: ask the user to run /open-gstack-browser (or "
+                f"/connect-chrome), then retry.\n\n"
+                f"Refusing to continue — a logged-out capture is worse than "
+                f"none, because it looks fine."
             )
 
     def close(self) -> None:
@@ -166,6 +172,35 @@ class BrowsePage:
             self._run("disconnect", timeout=60)
         except Exception:
             pass
+
+    # -- session state ----------------------------------------------------
+
+    def cookies(self) -> list[dict]:
+        """The live session's cookies, in Playwright's BrowserContext.cookies() shape.
+
+        Playwright hangs these off the context; gstack exposes them as
+        `$B cookies`. Needed because tools that cannot share the browser
+        session — yt-dlp fetching member-only audio, above all — have to be
+        handed a cookie jar on disk, and the only jar worth handing them is the
+        headed daemon's, since that is the one that is actually logged in.
+
+        Parsed off the whole of stdout rather than through `_parse`: `$B
+        cookies` pretty-prints a multi-line JSON array, so a last-line parse
+        sees a bare `]` and returns nothing, which reads as "no cookies" — the
+        same silent-empty failure mode this module exists to prevent.
+        """
+        out = self._run("cookies", timeout=60)
+        lines = out.splitlines()
+        for i, line in enumerate(lines):
+            stripped = line.lstrip()
+            # `[browse] ...` progress chatter also starts with `[`.
+            if stripped.startswith("[") and not stripped.startswith("[browse"):
+                try:
+                    data = json.loads("\n".join(lines[i:]))
+                except (ValueError, TypeError):
+                    return []
+                return data if isinstance(data, list) else []
+        return []
 
     # -- Playwright-shaped surface ---------------------------------------
 

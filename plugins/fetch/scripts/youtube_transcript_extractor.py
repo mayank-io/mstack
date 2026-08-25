@@ -1,18 +1,27 @@
 #!/usr/bin/env python3
 """
-YouTube Transcript Extractor v3.0
+YouTube Transcript Extractor v3.1
 Extracts transcripts, chapters, speakers, and metadata from YouTube videos.
 
 Strategy (in order):
 1. youtube_transcript_api — fast, no browser, no auth, covers most videos
-2. Playwright with persistent Chrome profile — for auth-gated or API-missing transcripts
+2. gstack browser (headed) — for auth-gated or API-missing transcripts
 3. Whisper via yt-dlp — last resort for videos with no captions at all
+
+New in v3.1:
+- Tier 2 runs through _browse.py (gstack, pinned to headed mode) instead of
+  launching its own Playwright Chromium on a throwaway profile. The throwaway
+  profile was logged out until someone sat through a five-minute interactive
+  login, and went stale silently after that — at which point a members-only
+  video reported "no transcript available", which reads as a fact about the
+  video rather than about the session.
+- `--profile` and `--headless` are accepted and ignored (see BrowserExtractor).
 
 New in v3.0:
 - youtube_transcript_api as primary extraction method (no browser needed)
 - oembed metadata (title, channel, thumbnail) without browser
-- Playwright demoted to fallback for auth-gated transcripts
-- Login detection: stops and asks user to log in if Chrome profile isn't authenticated
+- Browser demoted to fallback for auth-gated transcripts
+- Login detection: warns loudly when the browser session is not signed in
 
 New in v2.1:
 - Whisper fallback: automatically transcribes using yt-dlp + Whisper when no native transcript
@@ -26,9 +35,10 @@ New in v2.0:
 - Saves to temp file by default (avoids stdout truncation)
 """
 
-import asyncio
 import argparse
+import asyncio
 import json
+import os
 import re
 import subprocess
 import sys
@@ -36,6 +46,9 @@ import tempfile
 import urllib.request
 import urllib.error
 from pathlib import Path
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _browse import browse_page  # noqa: E402
 
 
 def _extract_video_id(url: str) -> str | None:
@@ -310,77 +323,112 @@ def scan_caption_integrity(transcript_text: str | None,
 
 
 # ---------------------------------------------------------------------------
-# Playwright-based extraction (fallback)
+# Browser-based extraction (fallback) — gstack browser, headed
 # ---------------------------------------------------------------------------
 
-class PlaywrightExtractor:
-    def __init__(self, chrome_profile_path: str, headless: bool = False):
-        self.chrome_profile_path = Path(chrome_profile_path).expanduser()
-        # Never headless. A headless run cannot show the login prompt this
-        # fallback depends on, and a logged-out capture looks like a success.
-        if headless:
-            print("Note: --headless is ignored; this fallback always runs headed.",
-                  file=sys.stderr)
-        self.headless = False
+# The transcript panel exists in two shapes. YouTube's current one is
+# `PAmodern_transcript_view` / `transcript-segment-view-model`; the legacy one
+# is `ytd-transcript-renderer` / `ytd-transcript-segment-renderer`. Both are
+# probed everywhere, because the rollout is not uniform and matching neither is
+# indistinguishable from "this video has no transcript".
+_SEGMENT_SELECTOR = "transcript-segment-view-model, ytd-transcript-segment-renderer"
+
+_SEGMENT_COUNTS_JS = """() => {
+    const panel = Array.from(document.querySelectorAll('ytd-engagement-panel-section-list-renderer'))
+        .find(el => (el.getAttribute('visibility') || '').includes('EXPANDED'));
+    return {
+        modern: document.querySelectorAll('transcript-segment-view-model').length,
+        legacy: document.querySelectorAll('ytd-transcript-segment-renderer').length,
+        expanded: panel ? (panel.getAttribute('target-id') || 'unknown') : null,
+    };
+}"""
+
+# Finding the scroller by measurement rather than by name: the modern panel
+# scrolls a `div.ytSectionListRendererContents`, the legacy one a `#content`,
+# and neither name is a contract.
+_SCROLLER_JS = """
+    const panel = document.querySelector('ytd-engagement-panel-section-list-renderer[target-id="PAmodern_transcript_view"]')
+        || document.querySelector('ytd-transcript-renderer');
+    if (!panel) return -1;
+    let sc = panel.querySelector('.ytSectionListRendererContents')
+        || panel.querySelector('#content')
+        || panel.querySelector('[class*="body"]');
+    if (!sc) {
+        panel.querySelectorAll('*').forEach(el => {
+            if (!sc && el.clientHeight > 100 && el.scrollHeight > el.clientHeight + 40) sc = el;
+        });
+    }
+    if (!sc) sc = panel;
+"""
+
+_SCROLL_STEP_JS = "() => {" + _SCROLLER_JS + """
+    sc.scrollTop = sc.scrollHeight;
+    return document.querySelectorAll('%s').length;
+}""" % _SEGMENT_SELECTOR
+
+_SCROLL_RESET_JS = "() => {" + _SCROLLER_JS + """
+    sc.scrollTop = 0;
+    return true;
+}"""
+
+
+class BrowserExtractor:
+    """Tier 2: read the transcript panel out of the user's real, logged-in browser.
+
+    All browser work goes through `_browse.py`, which pins the gstack daemon to
+    `headed` mode — the mode attached to the user's own Chrome, carrying their
+    real YouTube session. That guarantee matters here specifically: a
+    members-only or age-gated video served to a logged-out browser renders a
+    normal-looking watch page with no "Show transcript" button, which is
+    indistinguishable from "this video has no captions". The failure reads as a
+    fact about the video rather than a fact about the session.
+
+    Until 2026-08-24 this launched its own Playwright Chromium against a
+    throwaway profile at ~/.claude/youtube-chrome-profile
+    (`launch_persistent_context`). That profile was a strictly worse substitute
+    for what the headed daemon already has: it started logged out, needed a
+    five-minute interactive login the first time, and went stale silently
+    whenever its cookies expired — after which every gated video quietly
+    reported "no transcript available". The `--profile` and `--headless` flags
+    that fed it are now accepted and ignored, so existing call sites and the
+    skill's documented invocation keep working.
+    """
+
+    def __init__(self):
         self.cookies_file = None
 
     async def extract(self, video_url: str, export_cookies: bool = True) -> dict:
-        """Extract transcript and metadata from a YouTube video via Playwright."""
-        from playwright.async_api import async_playwright
+        """Extract transcript and metadata from a YouTube video via the gstack browser."""
+        # gstack browser — never headless, always headed (see _browse.py)
+        async with browse_page() as page:
+            if not await self._check_youtube_login(page):
+                # Warn, do not block. The old throwaway profile was guaranteed
+                # logged out on first use, so waiting five minutes for a manual
+                # login was worth it. The headed daemon is the user's own
+                # browser: if that is not signed in, an unattended run has
+                # nobody to wait for. Public videos still work; a gated one
+                # yields no transcript and main() then exits non-zero without
+                # emitting OUTPUT_FILE.
+                print("\n" + "=" * 60, file=sys.stderr)
+                print("WARNING: the browser session is NOT signed in to YouTube.",
+                      file=sys.stderr)
+                print("Members-only and age-gated videos will look like they have",
+                      file=sys.stderr)
+                print("no captions. Sign in to YouTube in Chrome and re-run.",
+                      file=sys.stderr)
+                print("=" * 60 + "\n", file=sys.stderr)
 
-        self.chrome_profile_path.mkdir(parents=True, exist_ok=True)
-
-        async with async_playwright() as p:
-            context = await p.chromium.launch_persistent_context(
-                user_data_dir=str(self.chrome_profile_path),
-                headless=self.headless,
-                viewport={'width': 1280, 'height': 900},
-                args=['--disable-blink-features=AutomationControlled'],
-            )
-            page = context.pages[0] if context.pages else await context.new_page()
-            try:
-                # Check login state before proceeding
-                logged_in = await self._check_youtube_login(page)
-                if not logged_in:
-                    print("\n" + "=" * 60, file=sys.stderr)
-                    print("NOT LOGGED IN TO YOUTUBE", file=sys.stderr)
-                    print("Please log in to YouTube in the browser window that opened,", file=sys.stderr)
-                    print("then press Enter here to continue...", file=sys.stderr)
-                    print("=" * 60 + "\n", file=sys.stderr)
-
-                    # Wait for user to log in (non-headless mode)
-                    if not self.headless:
-                        await page.goto('https://accounts.google.com/ServiceLogin?service=youtube', timeout=30000)
-                        # Poll until logged in or timeout after 5 minutes
-                        for _ in range(150):  # 150 * 2s = 5 minutes
-                            await asyncio.sleep(2)
-                            logged_in = await self._check_youtube_login(page)
-                            if logged_in:
-                                print("Login detected! Continuing...", file=sys.stderr)
-                                break
-                        if not logged_in:
-                            print("Login timeout. Proceeding without auth.", file=sys.stderr)
-                    else:
-                        print("Log in to YouTube in the browser window, then re-run.", file=sys.stderr)
-
-                result = await self._extract_from_page(page, video_url)
-                if export_cookies:
-                    await self._export_cookies(context)
-                return result
-            finally:
-                await context.close()
+            result = await self._extract_from_page(page, video_url)
+            if export_cookies:
+                self._export_cookies(page)
+            return result
 
     async def _check_youtube_login(self, page) -> bool:
-        """Check if the user is logged in to YouTube."""
+        """Check whether the browser session is signed in to YouTube."""
         try:
-            current_url = page.url
-            # Navigate to YouTube if not already there
-            if 'youtube.com' not in current_url:
-                await page.goto('https://www.youtube.com', wait_until='domcontentloaded', timeout=15000)
-                await asyncio.sleep(2)
-
-            # Check for avatar button (present when logged in) vs Sign In button
-            logged_in = await page.evaluate('''() => {
+            await page.goto('https://www.youtube.com', wait_until='domcontentloaded')
+            await page.wait_for_timeout(2000)
+            return bool(await page.evaluate('''() => {
                 // Logged-in users have an avatar button
                 const avatar = document.querySelector('#avatar-btn')
                     || document.querySelector('button#avatar-btn')
@@ -389,22 +437,27 @@ class PlaywrightExtractor:
 
                 // Not logged in if "Sign in" button is present
                 const signIn = document.querySelector('a[href*="ServiceLogin"]')
-                    || Array.from(document.querySelectorAll('a')).find(a => a.textContent?.trim() === 'Sign in');
+                    || Array.from(document.querySelectorAll('a')).find(a => a.textContent
+                        && a.textContent.trim() === 'Sign in');
                 if (signIn) return false;
 
                 // Ambiguous — assume not logged in
                 return false;
-            }''')
-            return logged_in
+            }'''))
         except Exception:
             return False
 
-    async def _export_cookies(self, context) -> None:
-        """Export cookies to Netscape format file for yt-dlp."""
+    def _export_cookies(self, page) -> None:
+        """Write the session's YouTube cookies to a Netscape jar for yt-dlp.
+
+        yt-dlp cannot share the browser session, so the Whisper tier needs the
+        cookies handed to it on disk or member-only audio 403s.
+        """
         try:
-            cookies = await context.cookies()
-            youtube_cookies = [c for c in cookies if 'youtube' in c.get('domain', '').lower()
-                              or 'google' in c.get('domain', '').lower()]
+            cookies = page.cookies()
+            youtube_cookies = [c for c in cookies
+                               if 'youtube' in (c.get('domain') or '').lower()
+                               or 'google' in (c.get('domain') or '').lower()]
             if not youtube_cookies:
                 return
 
@@ -433,9 +486,9 @@ class PlaywrightExtractor:
     async def _extract_from_page(self, page, video_url: str) -> dict:
         """Extract transcript and full metadata from the page."""
         print(f"Navigating to: {video_url}", file=sys.stderr)
-        await page.goto(video_url, wait_until='domcontentloaded', timeout=60000)
+        await page.goto(video_url, wait_until='domcontentloaded')
         await page.wait_for_selector('#movie_player', timeout=30000)
-        await asyncio.sleep(2)
+        await page.wait_for_timeout(2000)
 
         video_id = _extract_video_id(video_url)
         metadata = await self._extract_metadata(page, video_id)
@@ -470,83 +523,93 @@ class PlaywrightExtractor:
         }
 
     async def _extract_metadata(self, page, video_id: str | None) -> dict:
-        """Extract video metadata from the page."""
+        """Extract video metadata from the page.
+
+        One evaluate() per concern rather than Playwright's query_selector +
+        inner_text: the adapter deliberately exposes only goto/wait/evaluate,
+        because those are the three `$B` can implement without lying about
+        their semantics.
+        """
         await page.wait_for_selector('h1.ytd-watch-metadata', timeout=10000)
 
-        title_element = await page.query_selector('h1.ytd-watch-metadata')
-        title = await title_element.inner_text() if title_element else 'Unknown Title'
+        # Expand the description before reading it — collapsed, YouTube renders
+        # only the first few lines, which is where chapters and speakers live.
+        try:
+            expanded = await page.evaluate('''() => {
+                const btn = document.querySelector('#expand');
+                if (btn) { btn.click(); return true; }
+                return false;
+            }''')
+            if expanded:
+                await page.wait_for_timeout(700)
+        except Exception:
+            pass
 
-        channel_element = await page.query_selector('#channel-name a')
-        channel = await channel_element.inner_text() if channel_element else 'Unknown Channel'
+        info = await page.evaluate('''() => {
+            const text = (sel) => {
+                const el = document.querySelector(sel);
+                return el && el.textContent ? el.textContent.trim() : null;
+            };
 
-        duration = await page.evaluate('''() => {
+            let duration = null;
             const player = document.querySelector('#movie_player');
             if (player && player.getDuration) {
                 const seconds = player.getDuration();
                 const h = Math.floor(seconds / 3600);
                 const m = Math.floor((seconds % 3600) / 60);
                 const s = Math.floor(seconds % 60);
-                if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
-                return `${m}:${String(s).padStart(2, '0')}`;
+                duration = h > 0
+                    ? h + ':' + String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0')
+                    : m + ':' + String(s).padStart(2, '0');
             }
-            return null;
-        }''')
-        if not duration:
-            duration_element = await page.query_selector('.ytp-time-duration')
-            duration = await duration_element.inner_text() if duration_element else 'Unknown'
+            if (!duration) duration = text('.ytp-time-duration');
 
-        description = ''
-        try:
-            expand_button = await page.query_selector('#expand')
-            if expand_button:
-                await expand_button.click()
-                await asyncio.sleep(0.5)
-            desc_element = await page.query_selector('#description-inline-expander')
-            if desc_element:
-                description = await desc_element.inner_text()
-        except Exception:
-            pass
-
-        published_date = await page.evaluate('''() => {
+            let published = null;
             const infoStrings = document.querySelector('#info-strings');
             if (infoStrings) {
                 const dateEl = infoStrings.querySelector('yt-formatted-string');
-                if (dateEl) return dateEl.textContent?.trim();
+                if (dateEl && dateEl.textContent) published = dateEl.textContent.trim();
             }
-            const tooltip = document.querySelector('#tooltip');
-            if (tooltip) return tooltip.textContent?.trim();
-            return null;
+            if (!published) published = text('#tooltip');
+
+            return {
+                title: text('h1.ytd-watch-metadata') || 'Unknown Title',
+                channel: text('#channel-name a') || 'Unknown Channel',
+                duration: duration || 'Unknown',
+                description: text('#description-inline-expander') || '',
+                published_date: published,
+            };
         }''')
 
-        thumbnail_url = f"https://i.ytimg.com/vi/{video_id}/maxresdefault.jpg" if video_id else None
-
+        info = info or {}
         return {
-            'title': title.strip(),
-            'channel': channel.strip(),
-            'duration': duration,
-            'description': description.strip(),
-            'published_date': published_date,
-            'thumbnail_url': thumbnail_url,
+            'title': (info.get('title') or 'Unknown Title').strip(),
+            'channel': (info.get('channel') or 'Unknown Channel').strip(),
+            'duration': info.get('duration') or 'Unknown',
+            'description': (info.get('description') or '').strip(),
+            'published_date': info.get('published_date'),
+            'thumbnail_url': f"https://i.ytimg.com/vi/{video_id}/maxresdefault.jpg" if video_id else None,
         }
 
     async def _extract_transcript_text(self, page) -> str | None:
         """Extract transcript by opening the transcript panel."""
         try:
             print("Looking for transcript button...", file=sys.stderr)
-            await page.evaluate('window.scrollBy(0, 300)')
-            await asyncio.sleep(1)
+            await page.evaluate('() => { window.scrollBy(0, 300); return true; }')
+            await page.wait_for_timeout(1000)
 
             expanded = await page.evaluate('''() => {
                 const expandBtn = document.querySelector('tp-yt-paper-button#expand')
                     || document.querySelector('#expand')
                     || document.querySelector('#description-inline-expander #expand')
-                    || Array.from(document.querySelectorAll('button')).find(b => b.textContent.includes('...more'));
+                    || Array.from(document.querySelectorAll('button')).find(b => b.textContent
+                        && b.textContent.includes('...more'));
                 if (expandBtn) { expandBtn.click(); return true; }
                 return false;
             }''')
             if expanded:
                 print("Expanding description...", file=sys.stderr)
-                await asyncio.sleep(1.5)
+                await page.wait_for_timeout(1500)
 
             transcript_clicked = await page.evaluate('''() => {
                 const buttons = document.querySelectorAll('button');
@@ -564,23 +627,64 @@ class PlaywrightExtractor:
                 return None
 
             print("Clicked 'Show transcript' button...", file=sys.stderr)
-            await asyncio.sleep(2)
 
-            try:
-                await page.wait_for_selector('ytd-transcript-renderer', timeout=10000)
-            except Exception:
-                print("Transcript panel did not appear", file=sys.stderr)
+            # Poll for either panel markup rather than waiting on one selector.
+            # YouTube has replaced `ytd-transcript-renderer` /
+            # `ytd-transcript-segment-renderer` with a `PAmodern_transcript_view`
+            # panel built from `transcript-segment-view-model`. Verified live
+            # 2026-08-24: the old selectors match nothing on a current watch
+            # page, so this tier reported "Transcript panel did not appear" for
+            # every video, including ones whose transcript was right there on
+            # screen. The legacy branch is kept because the rollout is not
+            # uniform and costs one querySelectorAll to check.
+            counts = {}
+            for _ in range(24):
+                await page.wait_for_timeout(500)
+                counts = await page.evaluate(_SEGMENT_COUNTS_JS) or {}
+                if counts.get('modern') or counts.get('legacy'):
+                    break
+            else:
+                # Distinguish the two failures. An expanded-but-empty panel is
+                # the logged-out signature: YouTube renders the transcript
+                # chrome ("In this video / Chapters / Transcript") and never
+                # fills it. Reporting that as "no transcript panel" sent people
+                # looking for a video-side problem — the video has captions,
+                # the session just is not entitled to them. Observed live
+                # 2026-08-24 against a `launched` (logged-out) daemon on a
+                # video whose captions the API returns fine.
+                if counts.get('expanded'):
+                    print(f"Transcript panel '{counts['expanded']}' opened but stayed "
+                          f"empty after 12s. That is what a signed-out session looks "
+                          f"like — the video's captions may exist and simply not be "
+                          f"served. Sign in to YouTube in Chrome and re-run.",
+                          file=sys.stderr)
+                else:
+                    print("Transcript panel did not appear", file=sys.stderr)
                 return None
-
-            await asyncio.sleep(1)
 
             print("Scrolling to load full transcript...", file=sys.stderr)
             await self._scroll_transcript_panel(page)
 
             transcript_lines = await page.evaluate('''() => {
-                const segments = document.querySelectorAll('ytd-transcript-segment-renderer');
                 const lines = [];
-                segments.forEach(segment => {
+                const clean = (el) => (el && el.textContent ? el.textContent.trim() : '');
+
+                const modern = document.querySelectorAll('transcript-segment-view-model');
+                if (modern.length) {
+                    modern.forEach(segment => {
+                        // The second div is a screen-reader duration label
+                        // ("1 second"); never treat it as the timestamp.
+                        const timestampEl = segment.querySelector('.ytwTranscriptSegmentViewModelTimestamp')
+                            || segment.querySelector('div');
+                        const textEl = segment.querySelector('span[role="text"]')
+                            || segment.querySelector('span');
+                        const text = clean(textEl);
+                        if (text) lines.push((clean(timestampEl) + ' ' + text).trim());
+                    });
+                    return lines;
+                }
+
+                document.querySelectorAll('ytd-transcript-segment-renderer').forEach(segment => {
                     const timestampEl = segment.querySelector('[class*="timestamp"]')
                         || segment.querySelector('div[class*="segment-start-offset"]')
                         || segment.querySelector('div');
@@ -589,15 +693,13 @@ class PlaywrightExtractor:
                     if (!timestampEl || !textEl) {
                         const divs = segment.querySelectorAll('div');
                         if (divs.length >= 2) {
-                            const timestamp = divs[0]?.textContent?.trim() || '';
-                            const text = divs[1]?.textContent?.trim() || '';
-                            if (text) lines.push(`${timestamp} ${text}`);
+                            const text = clean(divs[1]);
+                            if (text) lines.push((clean(divs[0]) + ' ' + text).trim());
                             return;
                         }
                     }
-                    const timestamp = timestampEl?.textContent?.trim() || '';
-                    const text = textEl?.textContent?.trim() || '';
-                    if (text) lines.push(`${timestamp} ${text}`);
+                    const text = clean(textEl);
+                    if (text) lines.push((clean(timestampEl) + ' ' + text).trim());
                 });
                 return lines;
             }''')
@@ -614,24 +716,24 @@ class PlaywrightExtractor:
             return None
 
     async def _scroll_transcript_panel(self, page) -> None:
-        """Scroll the transcript panel to trigger lazy loading of all segments."""
-        await page.evaluate('''async () => {
-            const panel = document.querySelector('ytd-transcript-renderer');
-            if (!panel) return;
-            const scrollContainer = panel.querySelector('#content')
-                || panel.querySelector('[class*="body"]') || panel;
-            let prevCount = 0;
-            let attempts = 0;
-            while (attempts < 100) {
-                scrollContainer.scrollTop = scrollContainer.scrollHeight;
-                await new Promise(r => setTimeout(r, 200));
-                const currentCount = document.querySelectorAll('ytd-transcript-segment-renderer').length;
-                if (currentCount === prevCount) break;
-                prevCount = currentCount;
-                attempts++;
-            }
-            scrollContainer.scrollTop = 0;
-        }''')
+        """Scroll the transcript panel until the segment count stops growing.
+
+        The loop is driven from Python, one synchronous evaluate() per step.
+        It used to be a single `async () => { ... setTimeout ... }` block, which
+        real Playwright awaits — `$B js` does not, so the adapter refuses async
+        JavaScript outright rather than return an unresolved promise that reads
+        as "the panel is empty". Long videos lazily render their transcript, so
+        skipping the scroll silently truncates the result.
+        """
+        prev_count = -1
+        for _ in range(100):
+            count = await page.evaluate(_SCROLL_STEP_JS)
+            if not isinstance(count, int) or count < 0 or count == prev_count:
+                break
+            prev_count = count
+            await page.wait_for_timeout(200)
+
+        await page.evaluate(_SCROLL_RESET_JS)
 
     @staticmethod
     def _deduplicate(lines: list[str]) -> list[str]:
@@ -708,11 +810,13 @@ def run_whisper_fallback(video_url: str, video_id: str, metadata: dict, whisper_
 async def main():
     parser = argparse.ArgumentParser(description='Extract YouTube video transcript')
     parser.add_argument('url', help='YouTube video URL')
-    parser.add_argument('--profile', default='~/.claude/youtube-chrome-profile',
-                       help='Path to Chrome profile directory (default: ~/.claude/youtube-chrome-profile)')
+    # Both browser flags are dead: tier 2 drives the gstack daemon, which owns
+    # its own (headed, logged-in) Chrome. They are still accepted because the
+    # skill's documented invocation and existing call sites pass --profile.
+    parser.add_argument('--profile', default=None,
+                       help='Deprecated and ignored — the gstack browser supplies the session')
     parser.add_argument('--headless', action='store_true',
-                       # deprecated: accepted for compatibility, always ignored
-                       help='Run browser in headless mode (requires existing login)')
+                       help='Deprecated and ignored — browser work is always headed')
     parser.add_argument('--output', '-o', help='Output file path (default: temp file)')
     parser.add_argument('--output-dir', dest='output_dir', default=None,
                         help='Output directory; filename is derived (default: temp dir)')
@@ -721,9 +825,16 @@ async def main():
     parser.add_argument('--whisper-model', default='medium',
                        help='Whisper model to use for fallback (tiny, base, small, medium, large)')
     parser.add_argument('--no-api', action='store_true',
-                       help='Skip youtube_transcript_api and go straight to Playwright')
+                       help='Skip youtube_transcript_api and go straight to the browser tier')
 
     args = parser.parse_args()
+
+    if args.profile:
+        print("Note: --profile is ignored; the gstack browser supplies the session.",
+              file=sys.stderr)
+    if args.headless:
+        print("Note: --headless is ignored; browser work is always headed.",
+              file=sys.stderr)
 
     video_id = _extract_video_id(args.url)
     if not video_id:
@@ -759,22 +870,28 @@ async def main():
             }
             print(f"Success via youtube_transcript_api", file=sys.stderr)
 
-    # --- Strategy 2: Playwright ---
+    # --- Strategy 2: gstack browser (headed) ---
     if not result:
-        print("\n[2/3] Trying Playwright with Chrome profile...", file=sys.stderr)
-        extractor = PlaywrightExtractor(
-            chrome_profile_path=args.profile,
-            headless=args.headless,
-        )
-        pw_result = await extractor.extract(args.url)
+        print("\n[2/3] Trying the gstack browser (headed)...", file=sys.stderr)
+        extractor = BrowserExtractor()
+        try:
+            browser_result = await extractor.extract(args.url)
+        except RuntimeError as e:
+            # _browse.py refuses to run when gstack is missing or stuck in
+            # `launched` mode, because a logged-out capture looks like a
+            # successful one. Say so out loud and fall through to Whisper,
+            # which needs no browser — never substitute a silent empty page.
+            print(f"Browser tier unavailable: {e}", file=sys.stderr)
+            browser_result = {}
         cookies_file = extractor.cookies_file
 
-        if pw_result.get('transcript'):
-            result = pw_result
-            print(f"Success via Playwright", file=sys.stderr)
+        if browser_result.get('transcript'):
+            result = browser_result
+            print("Success via the gstack browser", file=sys.stderr)
         else:
-            # Use Playwright metadata (richer than oembed: description, duration, published_date)
-            metadata = {k: pw_result.get(k) or metadata.get(k) for k in
+            # Browser metadata is richer than oembed: description, duration,
+            # published_date. Keep whatever it managed to read.
+            metadata = {k: browser_result.get(k) or metadata.get(k) for k in
                         ['title', 'channel', 'duration', 'description', 'published_date', 'thumbnail_url']}
 
     # --- Strategy 3: Whisper ---

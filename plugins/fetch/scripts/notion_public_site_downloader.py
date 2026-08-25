@@ -2,7 +2,12 @@
 """
 Notion Site Downloader
 Downloads all pages from a public Notion site as Markdown files.
-Uses Playwright for rendering and content extraction.
+
+Rendering goes through _browse.browse_page(), which drives the gstack browser in
+HEADED mode — the one attached to the user's real Chrome, holding their logins.
+Do not swap this for Playwright or any freshly launched browser: a logged-out
+profile returns a Notion login wall that renders as a short, valid-looking page,
+so an authwalled capture is indistinguishable from a thin one.
 """
 
 import asyncio
@@ -121,7 +126,7 @@ class NotionDownloader:
         # Wait for main content to load
         try:
             await page.wait_for_selector('main', timeout=10000)
-        except:
+        except Exception:
             pass
 
         await asyncio.sleep(2)  # Allow dynamic content to load
@@ -199,7 +204,7 @@ class NotionDownloader:
         content_parts = []
         seen_texts = set()
 
-        for block in content:
+        for block in (content or []):
             text = block['text']
 
             # Deduplicate by normalized text
@@ -241,7 +246,7 @@ class NotionDownloader:
                 body_text = await page.evaluate(
                     "(document.querySelector('main') || document.body).innerText")
                 content_parts = [body_text]
-            except:
+            except Exception:
                 content_parts = ["(Content could not be extracted)"]
 
         # Extract internal links
@@ -262,7 +267,7 @@ class NotionDownloader:
                     normalized = self.normalize_url(full_url)
                     if normalized != self.normalize_url(url):
                         internal_links.append(normalized)
-            except:
+            except Exception:
                 continue
 
         # Extract images
@@ -282,7 +287,7 @@ class NotionDownloader:
                     local_path = await self.download_image(src, url)
                     if local_path:
                         images.append({'src': src, 'local': local_path})
-            except:
+            except Exception:
                 continue
 
         return {
@@ -308,7 +313,7 @@ class NotionDownloader:
             # Wait for Notion content to render
             try:
                 await page.wait_for_selector('main', timeout=15000)
-            except:
+            except Exception:
                 await asyncio.sleep(3)
 
             # Additional wait for dynamic content

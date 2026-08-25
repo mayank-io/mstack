@@ -19,9 +19,37 @@ B="$HOME/.claude/skills/gstack/browse/dist/browse"
 "$B" js '<expression>'
 ```
 
+**The daemon must be in `headed` mode.** `browse status` reports either `headed`
+(attached to the user's real Chrome, carrying their logins) or `launched` (gstack's
+own Chromium on a fresh profile, logged into nothing). A `launched` daemon returns
+a login wall for every gated page, and a login wall reads as a *short page* rather
+than an error — nothing downstream will flag it. Verify the mode, and force a
+restart when it is wrong:
+
+```bash
+"$B" status                     # must report `mode: headed`
+"$B" connect --force-restart    # only when it does not — a launched daemon holds a
+                                # fresh profile with no logins, so nothing is lost
+```
+
+The `_browse.py` adapter runs this check inside `connect()` and refuses to continue
+if it cannot reach `headed`. Do the same by hand when driving `$B` directly.
+
+**Do NOT `disconnect` when done.** `browse disconnect` tears down the daemon and
+the logged-in sessions with it. Leave it running — the daemon is a shared user
+resource, `connect` is safe to call again, and only whoever started it should
+close it. The adapter's `close()` is deliberately a no-op, so leaving the
+`async with browse_page()` block tears down nothing.
+
 **Never launch a headless browser.** Not `headless=True`, not `--headless`, not a fresh `chromium.launch()`. If gstack is unavailable, stop and say so — a logged-out capture is worse than none, because it looks fine.
 
-**Do not `disconnect` a daemon you did not start.** It would close the user's browser and drop their tabs, cookies and logins. The `_browse.py` adapter handles this; if driving `$B` directly, leave a pre-existing daemon running.
+**Page JavaScript must be synchronous, and values are passed as arguments.** `$B js`
+returns before a promise resolves, so `evaluate()` refuses any expression that is an
+`async` function or contains `await` — the result would be silently lost. Drive the
+waiting and looping from Python with `await page.wait_for_timeout(ms)` between
+synchronous `evaluate()` calls. Pass values with `await page.evaluate(js, arg)`
+rather than string-interpolating them into the JavaScript: an interpolated value
+containing a quote breaks the expression.
 
 ## Input
 
@@ -36,11 +64,53 @@ B="$HOME/.claude/skills/gstack/browse/dist/browse"
 "$B" goto "<url>"
 ```
 
-**LinkedIn truncates long posts behind "…see more".** Expand before reading, or you will capture a fragment that reads as a complete short post:
+### Expanding the body
 
-```bash
-"$B" click 'text=see more'   # ignore failure — not every post is truncated
+**LinkedIn truncates long posts and hides the rest behind a "…more" control.** A truncated capture reads as a complete short post, so expanding is not optional.
+
+The control is **not always present**, and where it appears depends on the surface:
+
+| Surface | "…more" present? |
+|---|---|
+| A company or member **posts listing** — `linkedin.com/company/<name>/posts/` | **Yes**, on every post whose text overflows |
+| A **post permalink** — `linkedin.com/posts/<slug>-<id>` | **Often not.** The permalink frequently renders the truncated public variant with no expander at all. |
+
+**So try the listing surface when the permalink is short.** If a permalink yields a body under ~250 characters with no expander, the same post on its author's `/posts/` listing usually carries the full text plus a working "…more".
+
+Click every expander that belongs to the **post body**, not to comments:
+
+```javascript
+// Synchronous — page JS must never be async here.
+() => {
+  const clicked = [];
+  document.querySelectorAll(
+    '.feed-shared-inline-show-more-text__see-more-less-toggle, ' +
+    '.show-more-less-text__button--more, ' +
+    'button.see-more, ' +
+    '[aria-label*="see more" i], [aria-label*="show more" i]'
+  ).forEach(b => {
+    // Skip comment expanders — they add replies, not post text.
+    if (b.closest('.comments-comment-item, .comments-comment-entity')) return;
+    if (/comment/i.test(b.innerText || '')) return;
+    b.click();
+    clicked.push((b.innerText || b.getAttribute('aria-label') || '').trim().slice(0, 30));
+  });
+  return clicked;
+}
 ```
+
+Then wait and re-measure from Python:
+
+```python
+before = await page.evaluate("() => document.body.innerText.length")
+clicked = await page.evaluate(EXPAND_JS)
+await page.wait_for_timeout(1200)
+after = await page.evaluate("() => document.body.innerText.length")
+```
+
+**Report the delta.** A click that adds ~50 characters expanded a comment, not the post — that is the signature of hitting the wrong control, and it looks like success otherwise.
+
+### Login walls
 
 If the page shows a login form, retry once; the daemon carries existing cookies. If it persists, **stop and ask the user to log in inside the gstack browser**, then retry. Do not fall back to a logged-out fetch.
 
@@ -60,15 +130,54 @@ Use `"$B" snapshot` for the accessibility tree, and `$B js` for anything structu
 
 **Return `links` — do not follow them.** Recursing into shared content is `notes:clip`'s job; a fetch skill that pulls in a YouTube video has stopped being a fetch skill. Capture the preview card's title, description and image too: it is often the only trace left when the target link rots.
 
-⚠️ **Page JavaScript must be synchronous.** `$B js` returns before a promise resolves, so an in-page `await` silently loses its result. Drive any wait or scroll loop from Python with `page.wait_for_timeout(ms)` between synchronous `evaluate` calls — see `fetch:blog-post` Step 3 for the shape.
+⚠️ Page JavaScript stays synchronous — see the browser section above. `fetch:blog-post` Step 3 shows the Python-driven loop shape.
 
-## Step 3 — Download images
+## Step 3 — Download the attachments
 
-```bash
-curl -L -o "<output_dir>/linkedin-<author>-<n>.jpg" "<image_url>"
+**The attachment is frequently the content.** A post whose body reads "The Ultimate List of AI Neolabs — there are now 63 of them!" carries those 63 names in an attached image, not in text. Capturing the body and skipping the image captures the caption and loses the post.
+
+### Tell attachments apart from page furniture
+
+Filtering by size alone does not work — avatars are 400×400 and pass any sensible threshold. On one real post, a naive `naturalWidth >= 200` filter returned **8 images, of which 7 were furniture**. Discriminate on the **URL path segment**, which LinkedIn sets by role:
+
+| URL contains | What it is | Take it? |
+|---|---|---|
+| `/image-shrink_` , `/feedshare-shrink_` , `/feedshare-` | **post attachment** | ✅ yes |
+| `/profile-displayphoto` | author or commenter avatar | ❌ no |
+| `/profile-displaybackgroundimage` | profile banner | ❌ no |
+| `/article-cover_image` | "more from LinkedIn" sidebar | ❌ no |
+| `/company-logo_` , `/spotlight-` | brand furniture | ❌ no |
+
+```javascript
+() => Array.from(document.querySelectorAll('img'))
+  .map(i => i.currentSrc || i.src || '')
+  .filter(u => /\/(image-shrink_|feedshare-shrink_|feedshare-)/.test(u))
+  .filter((u, n, a) => a.indexOf(u) === n)
 ```
 
-LinkedIn's CDN sometimes rejects a bare `curl`. If it does, screenshot the image element through gstack rather than skipping it — **and say in your report that the image was screenshotted rather than downloaded**, since a re-encoded screenshot is not the original asset.
+### Ask for the largest rendition
+
+LinkedIn encodes the rendition in the path — `image-shrink_800` is a downscale. Rewrite the size upward before downloading and fall back if the larger one 404s:
+
+```bash
+big="${url/image-shrink_800/image-shrink_1280}"
+curl -fsL -o "<output_dir>/linkedin-<author>-<n>.jpg" "$big" \
+  || curl -fsL -o "<output_dir>/linkedin-<author>-<n>.jpg" "$url"
+```
+
+Same reasoning as requesting `name=orig` on X: **a downscaled image is unreadable exactly when it matters** — a list, a table, a chart, a screenshot of text.
+
+### Carousels and documents
+
+A post can attach a multi-page PDF carousel (`.native-document`, `[class*=carousel]`) rather than a single image. Those paginate — capture **every** page, and report the page count. One page of a twelve-page carousel is not the attachment.
+
+### When curl is refused
+
+LinkedIn's CDN sometimes rejects a bare `curl`. Screenshot the image element through gstack rather than skipping it — **and say in your report that it was screenshotted rather than downloaded**, since a re-encode is not the original asset.
+
+### Read what you downloaded
+
+If the body is short and an attachment is present, **the attachment is the post.** Open the image and describe or transcribe its content into the note. Filing an unexamined image and summarising from the caption is how the list of 63 gets lost.
 
 ## Step 4 — Report
 
@@ -94,11 +203,16 @@ What was checked, so you do not repeat it:
 | A separate expander for the body? | **None exists.** The only expanders are "Show more" and "See more comments". |
 | `/feed/update/urn:li:activity:<id>/` (the authenticated form) | Redirects to `/signup/cold-join` |
 
-**So: capture what is served, and say plainly that the body is truncated.** Report the character count and the last words captured. Do not present a 203-character fragment as the post.
+**Two things to try before accepting the truncation**, in order:
 
-What *does* come through reliably: author name, relative date, reaction and comment counts, comment text, and the link-preview card. Often the card is the point of the post, and it survives.
+1. **The author's posts listing.** `linkedin.com/company/<name>/posts/` (or a member's `/recent-activity/all/`) renders the same post with a working "…more" control that the permalink lacks. This is the highest-value fallback.
+2. **The attachment.** On the post above, the missing list of 63 was **in an attached image all along** — an `800×1491` graphic. The body was genuinely truncated *and* the content was still fully present, just not as text. Always run Step 3 before concluding anything is missing.
 
-If the full body is genuinely needed, the reliable route is a human opening the post in their own browser session and copying it — not more automation.
+Only after both: **capture what is served and say plainly that the body is truncated.** Report the character count and the last words captured. Never present a 203-character fragment as the post.
+
+What comes through reliably regardless: author name, relative date, reaction and comment counts, comment text, attachments, and the link-preview card.
+
+If the full body text is still needed after all that, the reliable route is a human opening the post in their own session and copying it — not more automation.
 
 ## Failure modes worth naming
 

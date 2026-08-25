@@ -302,3 +302,47 @@ def test_require_headed_false_skips_the_check():
 def test_mode_parses_status_output():
     assert ModeSpy(mode="headed").mode() == "headed"
     assert ModeSpy(mode="launched").mode() == "launched"
+
+
+# ---------------------------------------------------------------- cookies
+
+class CookieSpy(_browse.BrowsePage):
+    """Returns canned `$B cookies` stdout without shelling out."""
+
+    def __init__(self, out):
+        self.out = out
+
+    def _run(self, *args, **kwargs):
+        assert args[0] == "cookies"
+        return self.out
+
+
+_JAR = """[
+  {
+    "name": "SID",
+    "value": "abc",
+    "domain": ".youtube.com"
+  }
+]
+"""
+
+
+def test_cookies_parses_pretty_printed_json():
+    """`$B cookies` pretty-prints across many lines. The last-line parse used
+    everywhere else in this adapter sees a bare `]` — i.e. "no cookies" — which
+    would hand yt-dlp an empty jar and 403 every member-only download."""
+    assert _browse.BrowsePage.cookies(CookieSpy(_JAR)) == [
+        {"name": "SID", "value": "abc", "domain": ".youtube.com"}
+    ]
+
+
+def test_cookies_skips_browse_progress_chatter():
+    """`[browse] Starting server...` also begins with `[`, so a naive scan for
+    the first `[` would try to JSON-decode the log line."""
+    out = "[browse] Starting server...\n" + _JAR
+    assert len(_browse.BrowsePage.cookies(CookieSpy(out))) == 1
+
+
+def test_cookies_returns_empty_list_when_there_are_none():
+    assert _browse.BrowsePage.cookies(CookieSpy("[]\n")) == []
+    assert _browse.BrowsePage.cookies(CookieSpy("")) == []

@@ -113,10 +113,9 @@ B="$HOME/.claude/skills/gstack/browse/dist/browse"
 ```
 
 **Do NOT `disconnect` when done.** `browse disconnect` tears down the daemon and
-the logged-in sessions with it. Verified 2026-08-24: a disconnect after one
-capture left the browser logged out of both X and LinkedIn, so the next capture
-returned a login wall that reads as a short post. Leave the daemon running —
-`connect` is safe to call again, and only whoever started it should close it.
+the logged-in sessions with it. Leave it running — the daemon is a shared user
+resource, `connect` is safe to call again, and only whoever started it should
+close it.
 
 This overrides any instruction inside the downstream skill that says to use Playwright.
 

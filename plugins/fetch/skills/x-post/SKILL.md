@@ -22,15 +22,40 @@ B="$HOME/.claude/skills/gstack/browse/dist/browse"
 "$B" js '<expression>'
 ```
 
+**The daemon must be in `headed` mode.** `browse status` reports either `headed`
+(attached to the user's real Chrome, carrying their logins) or `launched` (gstack's
+own Chromium on a fresh profile, logged into nothing). A `launched` daemon returns
+a login wall for every gated page, and a login wall reads as a *short page* rather
+than an error — nothing downstream will flag it. Verify the mode, and force a
+restart when it is wrong:
+
+```bash
+"$B" status                     # must report `mode: headed`
+"$B" connect --force-restart    # only when it does not — a launched daemon holds a
+                                # fresh profile with no logins, so nothing is lost
+```
+
+The `_browse.py` adapter runs this check inside `connect()` and refuses to continue
+if it cannot reach `headed`. Do the same by hand when driving `$B` directly.
+
 **Do NOT `disconnect` when done.** `browse disconnect` tears down the daemon and
-the logged-in sessions with it. Verified 2026-08-24: a disconnect after one
-capture left the browser logged out of both X and LinkedIn, so the next capture
-returned a login wall that reads as a short post. Leave the daemon running —
-`connect` is safe to call again, and only whoever started it should close it.
+the logged-in sessions with it. Leave it running — the daemon is a shared user
+resource, `connect` is safe to call again, and only whoever started it should
+close it. The
+adapter's `close()` is deliberately a no-op, so leaving the `async with
+browse_page()` block tears down nothing.
 
 **Never launch a headless browser.** Not `headless=True`, not `--headless`, not a
 fresh `chromium.launch()`. If gstack is unavailable, stop and say so rather than
 falling back — a logged-out capture is worse than no capture, because it looks fine.
+
+**Page JavaScript must be synchronous, and values are passed as arguments.** `$B js`
+returns before a promise resolves, so `evaluate()` refuses any expression that is an
+`async` function or contains `await` — the result would be silently lost. Drive the
+waiting and looping from Python with `await page.wait_for_timeout(ms)` between
+synchronous `evaluate()` calls. Pass values with `await page.evaluate(js, arg)`
+rather than string-interpolating them into the JavaScript: an interpolated value
+containing a quote breaks the expression.
 
 ## Input
 
@@ -249,23 +274,16 @@ For X Articles, preserve:
 On the first post's page, scroll down to load thread posts, then find all articles by the same author. Capture a content snippet and a "replying to another user" flag for each, so the candidates can be filtered down to the genuine thread:
 
 ```javascript
-// Python driver — scroll down to load thread posts below the fold:
-//   previous = 0
-//   for i in range(10):
-//       await page.evaluate("() => window.scrollBy(0, window.innerHeight)")
-//       await page.wait_for_timeout(1000)
-//       current = await page.evaluate("() => document.querySelectorAll('article').length")
-//       if current == previous and i > 1: break
-//       previous = current
+// HARVEST_JS — run this INSIDE the scroll loop, once per iteration.
 //
-// X's timeline is VIRTUALISED: articles unmount as they leave the viewport.
-// Accumulate into a page-context variable keyed by status id across the loop,
-// then read it out once — a single pass at the end loses everything scrolled
-// past. The JS below is the page-context evaluate:
+// X's timeline is VIRTUALISED: articles unmount as they leave the viewport, so
+// a single pass after scrolling sees only what is on screen at the end and
+// loses everything scrolled past. This accumulates into a page-context
+// variable keyed by status id, which survives across evaluate() calls because
+// it lives on `window`.
 (handle) => {
+    window.__xacc = window.__xacc || {};
     const articles = document.querySelectorAll('article');
-    const posts = [];
-    const seen = new Set();
 
     for (const article of articles) {
       // Check author
@@ -294,20 +312,42 @@ On the first post's page, scroll down to load thread posts, then find all articl
       const snippet = (tweetText?.innerText || '').slice(0, 80);
       const isReplyToOther = /(^|\n)Replying to/.test(article.innerText || '');
 
-      if (statusId && !seen.has(statusId)) {
-        seen.add(statusId);
-        posts.push({ statusId, snippet, isReplyToOther });
-      }
+      if (statusId) window.__xacc[statusId] = { statusId, snippet, isReplyToOther };
     }
 
-    // Sort by status ID ascending (Snowflake IDs = chronological order)
-    posts.sort((a, b) => {
-      if (a.statusId.length !== b.statusId.length) return a.statusId.length - b.statusId.length;
-      return a.statusId < b.statusId ? -1 : a.statusId > b.statusId ? 1 : 0;
-    });
-
-    return posts;
+    return Object.keys(window.__xacc).length;   // progress signal for the loop
 }
+```
+
+Then read the accumulator out **once, after the loop finishes**:
+
+```javascript
+// READOUT_JS
+() => {
+  const posts = Object.values(window.__xacc || {});
+  // Sort by status ID ascending — Snowflake IDs are chronological.
+  posts.sort((a, b) =>
+    a.statusId.length !== b.statusId.length
+      ? a.statusId.length - b.statusId.length
+      : (a.statusId < b.statusId ? -1 : a.statusId > b.statusId ? 1 : 0));
+  return posts;
+}
+```
+
+Driven from Python — note the harvest happens **every iteration**, and the loop
+stops when the accumulator stops growing rather than when the visible count does:
+
+```python
+await page.evaluate("() => { window.__xacc = {}; }")   # reset per run
+previous = 0
+for i in range(10):
+    await page.evaluate("() => window.scrollBy(0, window.innerHeight)")
+    await page.wait_for_timeout(1000)
+    total = await page.evaluate(HARVEST_JS, handle)     # accumulate, don't replace
+    if total == previous and i > 1:
+        break
+    previous = total
+posts = await page.evaluate(READOUT_JS)
 ```
 
 Pass the author handle as the `evaluate` argument (`await page.evaluate(JS, handle)`), not by string-interpolating it into the JavaScript.
@@ -410,7 +450,7 @@ Same as single post format but with section headings preserved and `[Image: cont
 - Same-author ≠ same-thread: the author's replies to commenters appear by the same handle. Distinguish real thread members by tight ID/timestamp clustering and `isReplyToOther`; large ID gaps mark the end of the thread
 - Thread posts in the page view may be truncated — always navigate to individual URLs for full content
 - Status IDs are Snowflake-based: ascending = chronological order; threads posted together have near-adjacent IDs
-- Images are downloaded at full resolution (`name=large`)
+- Images are downloaded at original resolution (`name=orig`, per the Step 2 rewrite — `large` is a downscale)
 - If the page requires login, extraction may be limited
 
 ## Examples

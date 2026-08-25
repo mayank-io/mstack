@@ -29,15 +29,40 @@ B="$HOME/.claude/skills/gstack/browse/dist/browse"
 "$B" js '<expression>'
 ```
 
+**The daemon must be in `headed` mode.** `browse status` reports either `headed`
+(attached to the user's real Chrome, carrying their logins) or `launched` (gstack's
+own Chromium on a fresh profile, logged into nothing). A `launched` daemon returns
+a login wall for every gated page, and a login wall reads as a *short page* rather
+than an error — nothing downstream will flag it. Verify the mode, and force a
+restart when it is wrong:
+
+```bash
+"$B" status                     # must report `mode: headed`
+"$B" connect --force-restart    # only when it does not — a launched daemon holds a
+                                # fresh profile with no logins, so nothing is lost
+```
+
+The `_browse.py` adapter runs this check inside `connect()` and refuses to continue
+if it cannot reach `headed`. Do the same by hand when driving `$B` directly.
+
 **Do NOT `disconnect` when done.** `browse disconnect` tears down the daemon and
-the logged-in sessions with it. Verified 2026-08-24: a disconnect after one
-capture left the browser logged out of both X and LinkedIn, so the next capture
-returned a login wall that reads as a short post. Leave the daemon running —
-`connect` is safe to call again, and only whoever started it should close it.
+the logged-in sessions with it. Leave it running — the daemon is a shared user
+resource, `connect` is safe to call again, and only whoever started it should
+close it. The
+adapter's `close()` is deliberately a no-op, so leaving the `async with
+browse_page()` block tears down nothing.
 
 **Never launch a headless browser.** Not `headless=True`, not `--headless`, not a
 fresh `chromium.launch()`. If gstack is unavailable, stop and say so rather than
 falling back — a logged-out capture is worse than no capture, because it looks fine.
+
+**Page JavaScript must be synchronous, and values are passed as arguments.** `$B js`
+returns before a promise resolves, so `evaluate()` refuses any expression that is an
+`async` function or contains `await` — the result would be silently lost. Drive the
+waiting and looping from Python with `await page.wait_for_timeout(ms)` between
+synchronous `evaluate()` calls. Pass values with `await page.evaluate(js, arg)`
+rather than string-interpolating them into the JavaScript: an interpolated value
+containing a quote breaks the expression.
 
 ## Input
 
@@ -196,6 +221,6 @@ were digitized.
   Defuddle drops a figure.
 - Keep images co-located with the markdown (relative `images/...` refs) so the
   folder is portable.
-- The charts themselves are lost as images if a site lazy-loads them and Playwright
-  cannot reach the real src — re-run Step 3 after a fuller scroll if a figure is
-  empty.
+- The charts themselves are lost as images if a site lazy-loads them and the gstack
+  browser cannot reach the real src — re-run Step 3 after a fuller scroll if a
+  figure is empty.

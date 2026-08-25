@@ -1,11 +1,11 @@
 ---
 name: youtube-transcript
-description: "Extract transcript and metadata from a YouTube video using a persistent Chrome session. Use when the user shares a youtube.com or youtu.be URL and wants the transcript, video metadata, chapters, or speakers."
+description: "Extract transcript and metadata from a YouTube video using the gstack browser session. Use when the user shares a youtube.com or youtu.be URL and wants the transcript, video metadata, chapters, or speakers."
 ---
 
 # Download YouTube Transcript
 
-Extract the transcript and metadata from a YouTube video using Playwright with a persistent Chrome profile.
+Extract the transcript and metadata from a YouTube video. The script tries three tiers in order: `youtube_transcript_api` (no browser), the gstack browser's transcript panel, then Whisper over the audio.
 
 
 ## Browser — always gstack, never headless
@@ -23,10 +23,9 @@ B="$HOME/.claude/skills/gstack/browse/dist/browse"
 ```
 
 **Do NOT `disconnect` when done.** `browse disconnect` tears down the daemon and
-the logged-in sessions with it. Verified 2026-08-24: a disconnect after one
-capture left the browser logged out of both X and LinkedIn, so the next capture
-returned a login wall that reads as a short post. Leave the daemon running —
-`connect` is safe to call again, and only whoever started it should close it.
+the logged-in sessions with it. Leave it running — the daemon is a shared user
+resource, `connect` is safe to call again, and only whoever started it should
+close it.
 
 **Never launch a headless browser.** Not `headless=True`, not `--headless`, not a
 fresh `chromium.launch()`. If gstack is unavailable, stop and say so rather than
@@ -34,28 +33,23 @@ falling back — a logged-out capture is worse than no capture, because it looks
 
 ## Configuration
 
-Read the settings file at `.claude/download.local.md` to get:
-- `chrome_profile_path`: Path to persistent Chrome profile (default: `~/.claude/youtube-chrome-profile`)
-- `headless`: Run browser in headless mode (default: `false`)
+There is nothing to configure. The browser tier drives the gstack daemon, which
+supplies the session; the script does not launch a browser or manage a profile
+of its own.
 
-If the settings file doesn't exist, use defaults.
+`--profile` and `--headless` are still accepted so older call sites keep
+working, but both are ignored and the script says so on stderr. There is no
+longer a `chrome_profile_path` or `headless` setting to read.
 
-**Settings file template:**
-```yaml
----
-chrome_profile_path: ~/.claude/youtube-chrome-profile
-headless: false
----
-```
+## YouTube sign-in
 
-## First-Time Setup
-
-On first run, the browser will open **in visible mode** (not headless) so the user can:
-1. Log into YouTube if needed
-2. Accept any cookie banners
-3. The login state is saved to the Chrome profile for future runs
-
-The `--headless` flag is deprecated and ignored — this fallback always runs headed so the login prompt can be answered.
+The transcript comes out of whatever session the headed daemon holds — the
+user's own Chrome. If that session is not signed in to YouTube, the script
+prints a warning and continues: public videos are unaffected, but a
+members-only or age-gated one renders a watch page with **no "Show transcript"
+button**, which looks exactly like a video that has no captions. When you see
+that warning and the extraction comes back empty, the fix is to sign in to
+YouTube in Chrome — not to conclude the video has no transcript.
 
 ## Usage
 
@@ -69,10 +63,10 @@ Parse the YouTube URL from `$ARGUMENTS`. The URL can be in various formats:
 Run the extraction script:
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/scripts/youtube_transcript_extractor.py" "<URL>" --profile "<chrome_profile_path>"
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/youtube_transcript_extractor.py" "<URL>"
 ```
 
-Do not pass `--headless`; it is ignored.
+Do not pass `--profile` or `--headless`; both are ignored.
 
 **Important:** The script writes the transcript JSON to a file and prints its path as the **final stdout line**, prefixed per the skill contract:
 
@@ -84,7 +78,7 @@ Strip the prefix before using it — do not consume the whole line as a path:
 
 ```bash
 last=$(python3 "${CLAUDE_PLUGIN_ROOT}/scripts/youtube_transcript_extractor.py" \
-         "https://youtube.com/watch?v=abc123" --profile ~/.claude/youtube-chrome-profile | tail -1)
+         "https://youtube.com/watch?v=abc123" | tail -1)
 case "$last" in
   OUTPUT_FILE:*) json="${last#OUTPUT_FILE:}" ;;
   *) echo "extractor did not emit a result line — stop and report it"; exit 1 ;;
@@ -188,9 +182,9 @@ Speakers are identified from description patterns:
 
 ## Error Handling
 
-- If no transcript is available, the output will include `"transcript": null` and an `"error"` field
-- If the video requires login and the user isn't logged in, the browser opens for manual login
-- If the browser fails to launch, suggest running `playwright install chromium`
+- If no transcript is available from any tier, the script writes the metadata JSON but emits **no** `OUTPUT_FILE:` line and exits 3. An absent marker means stop and report, never "build the note anyway"
+- If the browser session is not signed in to YouTube, the script warns on stderr and continues — see "YouTube sign-in" above
+- If gstack is unavailable or stuck in `launched` mode, the browser tier is skipped with a loud stderr message and the run falls through to Whisper. It never substitutes a logged-out browser
 
 ## Technical Notes
 
