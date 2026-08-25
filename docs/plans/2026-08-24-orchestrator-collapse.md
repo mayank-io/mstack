@@ -286,13 +286,38 @@ Both pg-gyaan URLs in the vault are now **members-only** (`Camodity & nifty 15 d
 
 **One avenue not pursued:** yt-dlp logged `Skipping client "android" since it does not support cookies`, so the cookie jar exported from the Chrome profile was never applied to the client that could have used it. If the user is a member of that channel, a cookie-capable client might reach the audio. Worth trying only if members-only capture is actually wanted — it is a different feature from this plan.
 
-### 10.5 A silent success on an empty transcript (found by task 28)
+### 10.6 Hindi verified on a different video
+
+`xAMfz_xHPIM` (IlaVerse Highlights) reaches the Hindi path the gated pg-gyaan videos could not:
+
+| Check | Result |
+|---|---|
+| Language detection | ✅ `hi` |
+| Transcript | ✅ 8,809 chars, 5,948 Devanagari |
+| Cleaner verbatim invariant on Devanagari | ✅ **1701 → 1701 tokens identical, 5,948 → 5,948 Devanagari preserved** |
+
+Native captions existed, so Whisper was not exercised. And this is not a `pg gyaan` video, so the **channel override, IST→PST table and date wikilinks remain unverified** — those are template content, and they need a public pg-gyaan video. What is now proven is the part that mattered most: **the cleaner does not mangle Devanagari.**
+
+### 10.5 A silent success on an empty result — in four scripts, not one
 
 The extractor emitted `OUTPUT_FILE:` after **all three tiers failed**, over a JSON whose `transcript` was `""`. A caller chaining on the marker — which is exactly what the contract instructs — would have read that file and written a note with an empty body, with nothing anywhere reporting a problem. The stderr log was loud; the machine-readable contract said success.
 
 Now: no marker, exit 3, and an explicit message. The JSON is still written because the metadata is worth keeping. Verified both directions — gated video exits 3 with no marker, public video exits 0 with one.
 
-**This is the fifth defect this milestone found by running things rather than reading them**, after the adapter's argument-dropping, its async silence, its destructive close, and its multiple-match wait failure. Every one of them reported success or nothing while doing the wrong thing.
+**The same bug was in three more scripts.** Auditing every `fetch:*` script for an unguarded success marker:
+
+| Script | Was it guarded? | Empty case that would have reported success |
+|---|---|---|
+| `youtube_transcript_extractor.py` | ❌ | all three tiers fail → `transcript: ""` |
+| `scribd_extractor.py` | ❌ | every page download fails → "Done. 0 images saved" |
+| `notion_public_site_downloader.py` | ❌ | zero pages crawled → "Done! 0 pages saved" |
+| `whisper_transcriber.py` | ❌ | Whisper returns no segments |
+| `chart_to_ascii.py` | ✅ effectively | always writes real content |
+| `verify_caption_window.py` | ✅ | emits no marker at all |
+
+All four now exit 3 with no marker. Two also gained a **partial**-capture warning, which is the subtler version of the same failure: scribd reports how many pages failed, and notion flags pages under 400 bytes — the signature of unexpanded toggle blocks, which looks exactly like a short page.
+
+**This is the fifth and sixth defect this milestone found by running things rather than reading them**, after the adapter's argument-dropping, its async silence, its destructive close, and its multiple-match wait failure. Every one reported success, or nothing, while doing the wrong thing.
 
 ### 10.3 LinkedIn permalink truncation — a limit, not a bug
 

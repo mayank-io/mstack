@@ -178,6 +178,22 @@ async def extract_scribd_images(url: str, output_dir: str = "./scribd_output"):
 
     downloaded = len([f for f in os.listdir(output_dir) if f.endswith(".jpg")])
     print(f"Done. {downloaded} images saved to {output_dir}/", flush=True)
+
+    # Never report success on an empty capture. Every page can fail — the
+    # embed 404s, the document is gated — and the loop above swallows each
+    # failure to keep going. Emitting OUTPUT_DIR then tells the caller to go
+    # build a note out of an empty directory.
+    if downloaded == 0:
+        print(f"ERROR: no pages were downloaded from {url}. See the per-page "
+              f"failures above. No OUTPUT_DIR marker is emitted, because a "
+              f"caller chaining on it would summarise an empty directory.",
+              file=sys.stderr)
+        sys.exit(3)
+    if downloaded < len(urls):
+        print(f"WARNING: {len(urls) - downloaded} of {len(urls)} pages failed. "
+              f"The capture is INCOMPLETE — say so rather than presenting it "
+              f"as the whole document.", file=sys.stderr)
+
     # contract: final stdout line is machine-parseable
     print(f"OUTPUT_DIR:{output_dir}")
 

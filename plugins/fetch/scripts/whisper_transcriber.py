@@ -288,6 +288,15 @@ def main():
             with open(output_path, 'w', encoding='utf-8') as f:
                 json.dump(result, f, ensure_ascii=False, indent=2)
 
+            # Never report success on an empty transcription. Whisper can
+            # return no segments — silent audio, a failed decode — and the
+            # caller chaining on OUTPUT_FILE would write a note with no body.
+            if not (result.get('transcript') or '').strip():
+                print(f"ERROR: Whisper produced an empty transcript for "
+                      f"{video_id}. Metadata was written to {output_path}, but "
+                      f"no OUTPUT_FILE marker is emitted.", file=sys.stderr)
+                sys.exit(3)
+
             print(f"OUTPUT_FILE:{output_path}", file=sys.stderr)
             # contract: final stdout line is machine-parseable
             print(f"OUTPUT_FILE:{output_path}")

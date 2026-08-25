@@ -447,6 +447,29 @@ class NotionDownloader:
         map_path.write_text(json.dumps(map_data, indent=2))
 
         print(f"\nDone! {len(self.page_map)} pages saved to {self.output_dir}")
+
+        # Never report success on an empty crawl. A Notion site that refuses to
+        # render, or a URL that is not actually a public site, yields zero
+        # pages — and OUTPUT_DIR would send the caller to summarise nothing.
+        if not self.page_map:
+            print("ERROR: no pages were captured. The URL may not be a public "
+                  "Notion site, or rendering failed. No OUTPUT_DIR marker is "
+                  "emitted, because a caller chaining on it would summarise an "
+                  "empty directory.", file=sys.stderr)
+            sys.exit(3)
+
+        # A page that is mostly headings with empty bodies is the classic
+        # Notion failure — collapsed toggles the crawler never expanded. It
+        # looks like a valid short page, so it has to be surfaced numerically.
+        thin = [u for u, i in self.page_map.items()
+                if len((i.get('content') or '')) < 400]
+        if thin:
+            print(f"WARNING: {len(thin)} of {len(self.page_map)} pages are under "
+                  f"400 bytes. That is the signature of unexpanded toggle blocks, "
+                  f"not of short pages. Re-extract them with toggles expanded and "
+                  f"compare byte counts before accepting this capture.",
+                  file=sys.stderr)
+
         # contract: final stdout line is machine-parseable
         print(f"OUTPUT_DIR:{self.output_dir}")
 
