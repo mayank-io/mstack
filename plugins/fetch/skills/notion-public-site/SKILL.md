@@ -59,7 +59,7 @@ python3 -m playwright install chromium
 After download completes, verify the content:
 
 1. **Count verification**: Compare number of downloaded pages against expected (check _page_map.json)
-2. **Content spot-check**: Use Playwright to open 2-3 random pages and compare visible content with downloaded markdown
+2. **Content spot-check**: open 2-3 random pages in the **gstack browser** and compare visible content with the downloaded markdown
 3. **Link verification**: Confirm wikilinks in markdown files point to existing files
 4. **Image verification**: Confirm images in attachments/ folder are valid and referenced
 

@@ -49,7 +49,7 @@ python3 -m playwright install chromium
 
 The script handles everything:
 1. Converts the Scribd URL to its embed form (`/embeds/{id}/content`)
-2. Launches a headless browser and navigates to the embed
+2. Drives the **gstack browser** (headed, via `_browse.py`) to the embed — never a headless instance, which would return a login wall for any gated document
 3. Reads the toolbar to detect total page count
 4. Scrolls through the document to trigger lazy loading of all pages
 5. Runs targeted scrolling passes for any pages that didn't load

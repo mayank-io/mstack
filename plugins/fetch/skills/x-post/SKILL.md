@@ -45,29 +45,48 @@ Ensure the URL matches:
 
 Extract the `{username}` and `{id}` (status ID) from the URL.
 
-### Step 2: Extract Focal Post with Playwright
+### Step 2: Extract Focal Post
 
-Use `mcp__playwright__browser_run_code` to navigate and extract. This code includes an image-wait polling loop (up to 7.5s) to ensure media images have loaded:
+Drive the **gstack browser** through the `_browse.py` adapter — never `mcp__playwright__*`. The adapter exposes a Playwright-shaped API (`goto`, `wait_for_selector`, `evaluate`) over `$B`, so the page-context JavaScript below is unchanged from the Playwright version; only the driver differs.
+
+```python
+import asyncio, json, sys
+sys.path.insert(0, "${CLAUDE_PLUGIN_ROOT}/scripts")
+from _browse import browse_page
+
+JS = r'''<the extraction function below>'''
+
+async def main():
+    async with browse_page() as page:          # headed, carries the user's session
+        await page.goto("THE_URL_HERE")
+        await page.wait_for_selector("article", timeout=15000)
+        for _ in range(15):                    # poll up to 7.5s for media to load
+            if await page.evaluate(IMAGES_READY_JS):
+                break
+            await asyncio.sleep(0.5)
+        print(json.dumps(await page.evaluate(JS)))
+
+asyncio.run(main())
+```
+
+⚠️ **`$B js` prints its result rather than returning it**, so the adapter wraps every expression in `JSON.stringify` before evaluating. An expression that already stringifies itself would be double-encoded — return a plain object and let the adapter serialise.
+
+`IMAGES_READY_JS` — poll until media images have a real `src`:
 
 ```javascript
-async (page) => {
-  await page.goto('THE_URL_HERE');
-  await page.waitForSelector('article', { timeout: 15000 });
+() => {
+  const article = document.querySelector('article');
+  if (!article) return true;
+  const imgs = article.querySelectorAll('img[alt="Image"]');
+  if (imgs.length === 0) return true;
+  return Array.from(imgs).every(img => img.src && img.src.includes('pbs.twimg.com/media'));
+}
+```
 
-  // Poll until media images have loaded src (up to 7.5s)
-  for (let i = 0; i < 15; i++) {
-    const hasImages = await page.evaluate(() => {
-      const article = document.querySelector('article');
-      if (!article) return true;
-      const imgs = article.querySelectorAll('img[alt="Image"]');
-      if (imgs.length === 0) return true;
-      return Array.from(imgs).every(img => img.src && img.src.includes('pbs.twimg.com/media'));
-    });
-    if (hasImages) break;
-    await page.waitForTimeout(500);
-  }
+The extraction function itself:
 
-  return await page.evaluate(() => {
+```javascript
+() => {
     const article = document.querySelector('article');
     if (!article) return { error: 'No article found' };
 
@@ -109,13 +128,15 @@ async (page) => {
     const photoLinks = article.querySelectorAll('a[href*="/photo/"]');
     const expectedImageCount = photoLinks.length;
 
-    // Images
+    // Images — always request the ORIGINAL resolution, not 'large'.
+    // X serves &name=small/medium/large as downscales; only 'orig' is the
+    // full-resolution file, and a downscaled chart or screenshot is often
+    // unreadable at the point it matters.
     const images = Array.from(article.querySelectorAll('img'))
       .filter(img => img.src && img.src.includes('pbs.twimg.com/media'))
-      .map(img => img.src.replace(/name=\w+/, 'name=large'));
+      .map(img => img.src.replace(/name=\w+/, 'name=orig'));
 
     return { handle, displayName, content, timestamp, displayTime, metrics, images, expectedImageCount };
-  });
 }
 ```
 
@@ -203,7 +224,7 @@ async (page) => {
 
 If `content` is empty or very short (< 50 characters), the post is an X Article. Fall back to accessibility snapshot:
 
-1. Use `mcp__playwright__browser_snapshot` to capture the full page structure
+1. Capture the full page structure with `"$B" snapshot` — the gstack accessibility snapshot. Do **not** use `mcp__playwright__browser_snapshot`: a fresh Playwright session is logged out and X Articles are frequently gated.
 2. Parse the snapshot for article content:
    - **Title**: Look for text in `generic` elements near the top of the article
    - **Headings**: `heading [level=1]` or `heading [level=2]` elements
@@ -380,7 +401,7 @@ Same as single post format but with section headings preserved and `[Image: cont
 
 ## Tips
 
-- X blocks direct HTTP fetching — Playwright is required
+- X blocks direct HTTP fetching — a real browser is required, and it must be the gstack one (the user's logged-in session). A logged-out browser returns a login wall that looks like an empty post rather than an error.
 - Regular tweets have `[data-testid="tweetText"]`; X Articles do not
 - Thread posts are detected by finding multiple `<article>` elements by the same author
 - The shared link may be mid-thread — Step 2.5 walks back to the first post via the ancestor articles rendered ABOVE the focal tweet

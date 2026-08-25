@@ -11,6 +11,7 @@ wait_for_selector, evaluate. Signatures match Playwright's so call sites barely
 change.
 """
 
+import asyncio
 import json
 import os
 import shutil
@@ -77,9 +78,32 @@ class BrowsePage:
     # -- lifecycle --------------------------------------------------------
 
     def connect(self) -> None:
-        self._run("connect", timeout=180)
+        """Attach to the gstack daemon, starting one only if none is running.
+
+        The user's normal state is a headed daemon already open holding their
+        logins. `browse connect` refuses in that case ("A healthy daemon is
+        already running… Connecting headed would kill it"), which would fail
+        every fetch skill at step one. An existing daemon is exactly what we
+        want, so that refusal is success.
+        """
+        try:
+            self._run("connect", timeout=180)
+            self._owns_daemon = True
+        except BrowseError as e:
+            if "already running" in str(e):
+                self._owns_daemon = False  # someone else's — leave it alone
+            else:
+                raise
 
     def close(self) -> None:
+        """Disconnect ONLY a daemon this object started.
+
+        Disconnecting one we merely attached to would close the user's browser
+        and drop their tabs, cookies and logins mid-session — destroying the
+        very thing that makes gstack worth using.
+        """
+        if not getattr(self, "_owns_daemon", False):
+            return
         try:
             self._run("disconnect", timeout=60)
         except Exception:
@@ -101,19 +125,70 @@ class BrowsePage:
         except BrowseError as e:
             raise BrowseError(f"selector never appeared: {selector} ({e})")
 
-    async def evaluate(self, expression: str, *_args):
+    async def wait_for_timeout(self, ms: int):
+        """Playwright's page.waitForTimeout, in ms. Present so callers written
+        in Playwright idiom do not have to be rewritten."""
+        await asyncio.sleep(ms / 1000)
+
+    async def evaluate(self, expression: str, *args):
         """Evaluate JS and return a Python value, like Playwright's page.evaluate.
 
-        `$B js` PRINTS its result, so objects and arrays would arrive as
-        "[object Object]" unless serialised. Everything is wrapped in
-        JSON.stringify and decoded here, which restores Playwright semantics.
+        Two differences from a raw `$B js` call, both restoring Playwright
+        semantics:
+
+        1. `$B js` PRINTS its result, so objects and arrays would arrive as
+           "[object Object]" unless serialised. Everything is wrapped in
+           JSON.stringify and decoded here.
+        2. `$B js` takes an expression, not a function plus arguments. Args are
+           JSON-encoded and applied to the function literal. Silently dropping
+           them — as this did until 2026-08-24 — is worse than failing: a
+           thread-root walk passing `focalId` would see `undefined` and report
+           "not a thread" for a real thread, with no error anywhere.
         """
         expr = expression.strip()
-        # an arrow-function literal must be invoked, not returned
-        if expr.startswith("()") or (expr.startswith("(") and "=>" in expr.split("\n")[0]):
-            expr = f"({expr})()"
-        if "JSON.stringify" not in expr.split("\n")[0]:
-            expr = f"JSON.stringify(({expr}))"
+        head = expr.split("\n")[0]
+        is_async = expr.startswith("async")
+        body = expr[len("async"):].strip() if is_async else expr
+        is_fn = body.startswith("()") or (body.startswith("(") and "=>" in body.split("\n")[0])
+
+        if args:
+            if not is_fn:
+                raise BrowseError(
+                    "evaluate() got arguments but the expression is not a function "
+                    "literal; arguments can only be applied to a function"
+                )
+            packed = json.dumps(list(args))
+            call = f"({expr})(...JSON.parse({json.dumps(packed)}))"
+        elif is_fn:
+            # a function literal must be invoked, not returned
+            call = f"({expr})()"
+        else:
+            call = expr
+
+        if is_async or "await " in expr:
+            # `$B js` does NOT await promises — verified live 2026-08-24 against
+            # gstack: an async IIFE with a real 300ms await prints nothing, and
+            # JSON.stringify of the pending promise gives "{}". Either way the
+            # caller gets an empty result that reads as success.
+            #
+            # There is no expression-level fix; the CLI returns before the
+            # promise resolves. Hoist the waiting into Python instead:
+            #
+            #     for _ in range(15):
+            #         if await page.evaluate("() => document.readyState === 'complete'"):
+            #             break
+            #         await page.wait_for_timeout(500)
+            #
+            # Failing here is the point. Returning None silently turned
+            # "the scroll never ran" into "the page has no images".
+            raise BrowseError(
+                "evaluate() cannot run async JavaScript: `$B js` returns before a "
+                "promise resolves, so the result is silently lost. Restructure as "
+                "synchronous evaluate() calls with await page.wait_for_timeout(ms) "
+                "between them, driving the loop from Python."
+            )
+
+        expr = call if "JSON.stringify" in head else f"JSON.stringify(({call}))"
         raw = self._parse(self._run("js", expr, timeout=120))
         if isinstance(raw, str):
             try:
