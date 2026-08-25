@@ -212,15 +212,32 @@ Ships: all eight routes resolve inside `mstack`, through one skill.
 
 | # | Status | Task | Files |
 |---|---|---|---|
-| 13 | ⬜ | Create `fetch:linkedin-post` from the extraction half of `linkedin-to-obsidian/commands/save.md` — resolves §2.7 | `mstack:plugins/fetch/skills/linkedin-post/SKILL.md` |
-| 14 | ⬜ | Write the remaining templates: `x.md`, `linkedin.md`, `notion.md`, `paper.md`, `article.md`, `default.md` | `mstack:plugins/notes/templates/` |
-| 15 | ⬜ | Move recursion-into-linked-content from LinkedIn into `clip` as general behaviour; guard against cycles | `clip/SKILL.md` |
-| 16 | ⬜ | Purge the Playwright instructions in `fetch:x-post` `:50` and `:206`; replace with gstack via `_browse.py` — resolves §2.8 | `mstack:plugins/fetch/skills/x-post/SKILL.md` |
-| 17 | ⬜ | Audit every `fetch:*` and `notes:*` skill for any other surviving `mcp__playwright__` or headless instruction | `mstack` |
-| 18 | ⬜ | Implement §5.2 — route the fallback to `fetch:blog-post`; resolves §2.9 | `clip/SKILL.md` |
-| 19 | ⬜ | Verify each remaining route once: X thread with images, LinkedIn post with a linked X post, Notion site, Scribd doc, arXiv paper, PDF, plain article | — |
+| 13 | ✅ | Create `fetch:linkedin-post` from the extraction half of `linkedin-to-obsidian/commands/save.md` — resolves §2.7 | `mstack:plugins/fetch/skills/linkedin-post/SKILL.md` |
+| 14 | ✅ | Write the remaining templates: `x.md`, `linkedin.md`, `notion.md`, `paper.md`, `article.md`, `default.md` | `mstack:plugins/notes/templates/` |
+| 15 | ✅ | Move recursion-into-linked-content from LinkedIn into `clip` as general behaviour; guard against cycles | `clip/SKILL.md` |
+| 16 | ✅ | Purge the Playwright instructions in `fetch:x-post` `:50` and `:206`; replace with gstack via `_browse.py` — resolves §2.8 | `mstack:plugins/fetch/skills/x-post/SKILL.md` |
+| 17 | ✅ | Audit every `fetch:*` and `notes:*` skill for any other surviving `mcp__playwright__` or headless instruction | `mstack` |
+| 18 | ✅ | Implement §5.2 — route the fallback to `fetch:blog-post`; resolves §2.9 | `clip/SKILL.md` |
+| 19 | 🟡 | Verify each remaining route once: X thread with images, LinkedIn post with a linked X post, Notion site, Scribd doc, arXiv paper, PDF, plain article | — |
 
-**Gate:** seven notes written, images on disk at original resolution, the LinkedIn recursion produces two notes, and no route invokes Playwright.
+**Gate:** ✅ structural, 🟡 end-to-end.
+
+| Check | Result |
+|---|---|
+| Every route resolves — fetch skill and template both exist | ✅ 8/8; no unreachable fetch skill; only `default.md` unrouted, by design |
+| No route invokes Playwright as a driver | ✅ 0 remaining; what is left named `page.evaluate` is the adapter's own API |
+| Every JS block brace-balances, every Python block parses | ✅ |
+| `fetch:blog-post` scroll loop, live | ✅ 16 images recovered across 11,253px on a real lazy-loading page — the case that silently returned nothing before |
+| Adapter, live against a running daemon | ✅ attach, sync eval, args, Python poll loop, loud async refusal, daemon survived |
+| Seven notes actually written, one per route | 🟡 **not done** — see §9.1 |
+
+### 9.1 Deferred out of Milestone 3
+
+| # | Status | What | Why deferred | Lands in |
+|---|---|---|---|---|
+| 19d | ↪️ | Write one real note per route (X thread with images, LinkedIn post with a followed link, Notion site, Scribd doc, arXiv paper, PDF, plain article) and confirm images land at original resolution and the LinkedIn recursion produces two linked notes. | Seven live captures would put seven real notes in the user's vault to prove plumbing. M4 task 25 already re-verifies every route with the `mk` plugins uninstalled — which is the stronger test, since it also proves the cross-marketplace dependency is gone. Doing it twice writes fourteen notes. | **M4, task 25** (absorbed) |
+
+**What is proven without it:** every route resolves to an existing skill and template, no route reaches for Playwright, and the two fetch skills whose code changed most (`blog-post`, `x-post` via the adapter) work live. **What is not:** that each template produces a good note from real content. That is a content question, and it needs real captures.
 
 ## 10. Milestone 4 — retire the `mk` plugins
 
@@ -233,7 +250,7 @@ Ships: one repo owns capture; no cross-marketplace dependency; one entry point.
 | 22 | ⬜ | Bump `mk` `metadata.version` — the pre-commit hook rejects plugin changes without it | `mk:.claude-plugin/marketplace.json` |
 | 23 | ⬜ | Bump `mstack` `metadata.version` 0.6.0 → 0.7.0 | `mstack:.claude-plugin/marketplace.json` |
 | 24 | ⬜ | Uninstall the four retired plugins locally, `/reload-plugins`, confirm no skill name 404s | — |
-| 25 | ⬜ | Verify: all eight `clip` routes resolve with the four `mk` plugins uninstalled | — |
+| 25 | ⬜ | **Receives 19d (§9.1)** — clip one real URL per route with the four `mk` plugins uninstalled: X thread with images, LinkedIn post with a followed link, Notion site, Scribd doc, arXiv paper, PDF, plain article. Confirm images at original resolution, the LinkedIn recursion produces two linked notes, and no skill 404s. | — |
 | 26 | ⬜ | Commit and push both repos; rebase, no merge commits, no Claude Code signature | — |
 | 27 | ⬜ | **Receives 1d (§7.2)** — repoint `mk:docs/plans/2026-08-16-x-account-archive.md` from `plugins/download/` to `plugins/fetch/`, or mark it superseded. Confirm with the author which; do not silently rewrite another plan's intent. | `mk:docs/plans/` |
 | 28 | ⬜ | **Receives 12d (§8.2)** — clip a real `pg gyaan` video end to end: channel override selected, Whisper `medium`/`hi`, IST→PST table present, dates as wikilinks, Hindi preserved in quotes | — |
@@ -321,6 +338,7 @@ Every ↪️ in this plan, and the task that closes it. **This table is the audi
 |---|---|---|---|---|
 | 1d | M1 §7.2 | `x-account-archive` plan still says `plugins/download/` | M4 task 27 | ⬜ open |
 | 12d | M2 §8.2 | Hindi `pg gyaan` capture never exercised end to end | M4 task 28 | ⬜ open |
+| 19d | M3 §9.1 | One real note per route never written | M4 task 25 | ⬜ open |
 
 ## 14. Log
 
@@ -329,4 +347,5 @@ Every ↪️ in this plan, and the task that closes it. **This table is the audi
 | 2026-08-24 | Plan created after `notes:clip` was exercised on an X post and the survey found `youtube-to-obsidian:process` broken by the `download`→`fetch` rename. |
 | 2026-08-24 | M1 complete — `mstack 67d7219` (0.6.1), `mk 094def0` (1.2.1). Task 8 pulled forward: no fix for task 2 avoided path-reaching except moving caption remediation into `fetch`. |
 | 2026-08-24 | M2 complete but for the Hindi end-to-end check (§8, task 12). Templates migrated unchanged — both were already shape + declarative settings, so §4.5 required no edits to them. |
+| 2026-08-24 | M3 complete but for the per-route note-writing check (§9.1). Auditing x-post's Playwright instructions found four bugs in the adapter they would have been rewritten onto — three silent. See `7f6d51d`, `732f739`. |
 | 2026-08-24 | Rewritten. First draft added `notes:youtube` / `notes:x` / `notes:linkedin` as per-source skills. Sorting their contents (§4.2) showed every element already had a home, so the three skills were dropped and per-source knowledge became template data — keeping `clip` the single entry point. Milestone 3 shrank accordingly; `fetch:linkedin-post` and the `blog-post` routing decision were promoted in. |

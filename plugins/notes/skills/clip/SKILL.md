@@ -18,15 +18,15 @@ Match on the URL's host and path.
 | Source | Fetch with | Template |
 |--------|-----------|----------|
 | `youtube.com`, `youtu.be` | `fetch:youtube-transcript` | `youtube.md` (+ channel override) |
-| `*.notion.site`, `notion.so` | `fetch:notion-public-site` | — *(no template yet; compose the note yourself)* |
-| `scribd.com` | `fetch:scribd-document` | — *(same)* |
-| `alphaxiv.org`, `arxiv.org` | `fetch:alphaxiv-paper` | — *(same)* |
+| `x.com`, `twitter.com` | `fetch:x-post` | `x.md` |
+| `linkedin.com` | `fetch:linkedin-post` | `linkedin.md` |
+| `*.notion.site`, `notion.so` | `fetch:notion-public-site` | `notion.md` |
+| `scribd.com` | `fetch:scribd-document` | `article.md` |
+| `alphaxiv.org`, `arxiv.org` | `fetch:alphaxiv-paper` | `paper.md` |
 | PDF (any host, incl. Drive/Dropbox) | `curl` → `notes:save-local-file` | — |
-| `x.com`, `twitter.com` | ⏳ `x-to-obsidian:save` — writes the note itself | pending |
-| `linkedin.com` | ⏳ `linkedin-to-obsidian:save` — writes the note itself | pending |
-| anything else | ⏳ `obsidian:defuddle` | pending |
+| anything else | `fetch:blog-post` | `article.md` |
 
-⏳ **Three routes have not migrated yet.** They still go to the old note-writing plugins; invoke those and let them own filename, frontmatter, folder and daily-note update. They move to `fetch:x-post`, `fetch:linkedin-post` and `fetch:blog-post` with their own templates once those exist — `fetch:linkedin-post` has not been written yet, so do **not** try to invoke it. Tracked in `mstack/docs/plans/2026-08-24-orchestrator-collapse.md` §9.
+The fallback goes to **`fetch:blog-post`**, not `obsidian:defuddle`. `blog-post` uses Defuddle internally *and* recovers the lazy-loaded images Defuddle drops, digitizes embedded Vedic charts via `fetch:vedic-chart`, and emits the same `OUTPUT_DIR:` contract as every other route. Routing straight to `defuddle` skips all of that and reaches outside this marketplace for a capability we already own.
 
 **Every route is the same six steps.** There is no per-source skill, and there should never be one — what varies between sources is output shape, and shape lives in `templates/`.
 
@@ -78,6 +78,25 @@ Then hand the resolved path onward:
 - `OUTPUT_DIR:` → read what you need from the directory, → `notes:create`
 
 **One documented exception:** `fetch:vedic-chart` streams its product to stdout when no `output_dir` is given and emits no marker. Pass it an `output_dir` when clipping.
+
+## Step 2.5 — Follow what the source shares
+
+Captured content often points at other content: a LinkedIn post sharing a YouTube video, an X post quoting an article, a blog post embedding a tweet. **This is general behaviour, not a LinkedIn trait** — it lives here because `clip` is the only skill that can route a URL, and a `fetch:*` skill that started pulling in YouTube videos would have stopped being a fetch skill.
+
+When a fetch result carries a `links` field, or the content obviously centres on a shared URL:
+
+1. **Clip each shared URL by re-entering this skill.** It routes them the same way it routed the first.
+2. **Link the results together** — the parent note references each child by wikilink, so the relationship survives.
+3. **Judge before recursing.** Follow a link the post is *about*: the video it discusses, the article it quotes. Do not follow navigation, profile links, tracking URLs, or a bare domain mention.
+
+**Guard against cycles — this recursion is unbounded otherwise.** Two posts quoting each other, or a page linking its own canonical URL, will loop forever.
+
+- Keep a set of already-clipped URLs for this invocation, **normalised** — strip `utm_*` and other tracking params, resolve shorteners, drop the fragment, lower-case the host. `x.com/u/status/1?s=20` and `x.com/u/status/1` are the same post.
+- Never clip a URL already in the set, and add each URL *before* fetching it, not after.
+- **Depth limit 1 by default.** Clip what the post shares; do not clip what *that* shares. Going deeper needs the user to ask.
+- If a note already exists for a URL, link to it rather than re-clipping.
+
+**Say what you followed and what you skipped.** A silently-skipped link looks identical to a link that was never there.
 
 ## Step 3 — Apply the per-source overrides
 
