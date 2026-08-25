@@ -33,6 +33,8 @@ Analyze your Claude Code usage and turn one-off work into reusable patterns.
 | `/ccimprove:make-repeatable` | Analyze the current conversation and recommend whether to codify it as a skill or a plugin, then build it |
 | `/ccimprove:clean-permissions` | Prune one-off pastes, redundant entries, and dead MCP refs from `~/.claude/settings.json` |
 
+Ships a hook that runs automatically: **`claude plugin update` leaves the old commit-sha directory in the cache**, and that directory stays *loaded* — every stale copy contributes its skills to the slash menu again. Three copies of `/fetch:x-post` appeared this way. The hook prunes any cache directory no longer referenced by `installed_plugins.json`, on `PostToolUse/Bash` when the update runs through Claude and on `SessionStart` (throttled hourly) for updates made via `/plugin` or a plain terminal. Run it by hand with `python3 plugins/ccimprove/scripts/prune_plugin_cache.py --dry-run`.
+
 ### `dev` — development workflow
 
 Iterative reviews, doc conventions, and feedback loops for serious engineering work.

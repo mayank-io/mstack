@@ -1,0 +1,28 @@
+{
+  "description": "Keep the Claude Code plugin cache free of orphaned commit-sha directories left behind by `claude plugin update`",
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/prune-plugin-cache.sh",
+            "timeout": 10000
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/prune-plugin-cache.sh",
+            "timeout": 10000
+          }
+        ]
+      }
+    ]
+  }
+}
