@@ -77,14 +77,35 @@ class BrowsePage:
 
     # -- lifecycle --------------------------------------------------------
 
-    def connect(self) -> None:
-        """Attach to the gstack daemon, starting one only if none is running.
+    def mode(self) -> str:
+        """`headed` (attached to the user's real Chrome) or `launched`
+        (gstack's own browser, fresh profile, logged out of everything)."""
+        for line in self._run("status", timeout=60).splitlines():
+            if line.lower().startswith("mode:"):
+                return line.split(":", 1)[1].strip()
+        return "unknown"
 
-        The user's normal state is a headed daemon already open holding their
-        logins. `browse connect` refuses in that case ("A healthy daemon is
-        already running… Connecting headed would kill it"), which would fail
-        every fetch skill at step one. An existing daemon is exactly what we
-        want, so that refusal is success.
+    def connect(self, require_headed: bool = True) -> None:
+        """Attach to the gstack daemon in HEADED mode, starting one if needed.
+
+        Two failure modes this guards, both of which silently produce
+        logged-out captures:
+
+        1. `browse connect` refuses when a daemon is already running ("A
+           healthy daemon is already running… Connecting headed would kill
+           it"). An existing daemon is what we want, so that refusal is
+           success — treating it as fatal failed every fetch skill at step one.
+
+        2. **The daemon can be in `launched` mode.** gstack then runs its own
+           Chromium against a fresh profile that is logged into nothing. Every
+           gated source — X, LinkedIn, members-only YouTube — returns a login
+           wall or an authwall that reads as a short page. `connect` does not
+           say which mode you got, and nothing downstream checks.
+
+        Verified repeatedly on 2026-08-24: a daemon that dies and restarts
+        comes back `launched`, and the next capture silently hits an authwall.
+        Checking the mode is the only reliable guard — the caller cannot tell
+        from the content, which is the whole problem.
         """
         try:
             self._run("connect", timeout=180)
@@ -95,15 +116,52 @@ class BrowsePage:
             else:
                 raise
 
-    def close(self) -> None:
-        """Disconnect ONLY a daemon this object started.
-
-        Disconnecting one we merely attached to would close the user's browser
-        and drop their tabs, cookies and logins mid-session — destroying the
-        very thing that makes gstack worth using.
-        """
-        if not getattr(self, "_owns_daemon", False):
+        if not require_headed:
             return
+
+        current = self.mode()
+        if current == "headed":
+            return
+
+        # Wrong mode. Replacing it is safe: a `launched` daemon holds a fresh
+        # profile with no logins, so there is nothing to lose — which is
+        # precisely why it must be replaced.
+        self._run("connect", "--force-restart", timeout=180)
+        self._owns_daemon = True
+
+        current = self.mode()
+        if current != "headed":
+            raise BrowseError(
+                f"gstack is in '{current}' mode, not 'headed', after a forced "
+                f"restart. A launched-mode daemon uses a fresh profile with no "
+                f"logins, so every gated page returns a login wall that reads "
+                f"as a short page. Refusing to continue — a logged-out capture "
+                f"is worse than none, because it looks fine."
+            )
+
+    def close(self) -> None:
+        """Leave the daemon running. This is deliberately a no-op.
+
+        The daemon is a shared, long-lived user resource holding logged-in
+        sessions — it is not this object's to tear down. Three separate ways
+        that went wrong before this became a no-op:
+
+        - Disconnecting a daemon we merely attached to closed the user's
+          browser and dropped their tabs, cookies and logins mid-session.
+        - Disconnecting one we had just force-restarted into `headed` mode
+          destroyed the very session we established to fix a `launched`
+          daemon — and the next `status` call spawned a fresh `launched` one,
+          so the fix silently undid itself between calls.
+        - Six skills instructed `"$B" disconnect  # when done` in prose,
+          reproducing the first case by hand.
+
+        `connect` is cheap and idempotent, so there is no cost to leaving it
+        up. Pass `explicit=True` only when the user asked to close the browser.
+        """
+        return
+
+    def disconnect_explicitly(self) -> None:
+        """Actually tear the daemon down. Only when the user asked for it."""
         try:
             self._run("disconnect", timeout=60)
         except Exception:

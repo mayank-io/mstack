@@ -156,7 +156,9 @@ class LifecycleSpy(_browse.BrowsePage):
 
     def _run(self, *args, **kwargs):
         self.calls.append(args[0])
-        if args[0] == "connect" and self.daemon_running:
+        if args[0] == "status":
+            return "Status: healthy\nMode: headed\nTabs: 1\n"
+        if args[0] == "connect" and self.daemon_running and "--force-restart" not in args:
             raise _browse.BrowseError(
                 "`browse connect` failed: [browse] A healthy daemon is already "
                 "running (PID 21831, launched mode)."
@@ -178,21 +180,24 @@ def test_connect_starts_one_when_none_running():
     assert p._owns_daemon is True
 
 
-def test_close_does_not_kill_a_daemon_it_did_not_start():
-    """THE destructive one. Disconnecting a daemon we merely attached to closes
-    the user's browser and drops their tabs, cookies and logins mid-session."""
+def test_close_never_disconnects():
+    """close() is a no-op by design. It killed the user's session three ways
+    before: disconnecting a daemon we only attached to, disconnecting one we
+    had just force-restarted into headed (so the fix undid itself between
+    calls), and six skills instructing it in prose."""
+    for running in (True, False):
+        p = LifecycleSpy(daemon_running=running)
+        p.connect()
+        p.calls.clear()
+        p.close()
+        assert "disconnect" not in p.calls
+
+
+def test_explicit_disconnect_still_available():
     p = LifecycleSpy(daemon_running=True)
     p.connect()
     p.calls.clear()
-    p.close()
-    assert "disconnect" not in p.calls
-
-
-def test_close_disconnects_a_daemon_it_started():
-    p = LifecycleSpy(daemon_running=False)
-    p.connect()
-    p.calls.clear()
-    p.close()
+    p.disconnect_explicitly()
     assert "disconnect" in p.calls
 
 
@@ -237,3 +242,63 @@ def test_wait_passes_through_when_unique():
     p = WaitSpy()
     asyncio.run(p.wait_for_selector("article"))
     assert p.calls[0][0] == "wait"
+
+
+# ---------------------------------------------------------------- headed mode
+
+class ModeSpy(_browse.BrowsePage):
+    """Simulates a daemon reporting a given mode, flipping after force-restart."""
+
+    def __init__(self, mode="headed", mode_after_restart=None, already_running=False):
+        self.calls = []
+        self._mode = mode
+        self._after = mode_after_restart or mode
+        self.already_running = already_running
+
+    def _run(self, *args, **kwargs):
+        self.calls.append(args)
+        if args[0] == "connect":
+            if "--force-restart" in args:
+                self._mode = self._after
+                return ""
+            if self.already_running:
+                raise _browse.BrowseError("A healthy daemon is already running (PID 1).")
+            return ""
+        if args[0] == "status":
+            return f"Status: healthy\nMode: {self._mode}\nTabs: 1\n"
+        return ""
+
+
+def test_headed_daemon_is_left_alone():
+    p = ModeSpy(mode="headed", already_running=True)
+    p.connect()
+    assert not any("--force-restart" in c for c in p.calls)
+
+
+def test_launched_daemon_is_force_restarted():
+    """THE one that keeps biting. A daemon that dies and restarts comes back
+    'launched' — gstack's own Chromium on a fresh profile, logged into
+    nothing — and every gated page then returns an authwall that reads as a
+    short page. connect() does not report which mode you got."""
+    p = ModeSpy(mode="launched", mode_after_restart="headed")
+    p.connect()
+    assert any("--force-restart" in c for c in p.calls)
+    assert p.mode() == "headed"
+
+
+def test_refuses_when_headed_is_unreachable():
+    """Better to stop than to capture logged-out content that looks fine."""
+    p = ModeSpy(mode="launched", mode_after_restart="launched")
+    with pytest.raises(_browse.BrowseError, match="not 'headed'"):
+        p.connect()
+
+
+def test_require_headed_false_skips_the_check():
+    p = ModeSpy(mode="launched")
+    p.connect(require_headed=False)
+    assert not any("--force-restart" in c for c in p.calls)
+
+
+def test_mode_parses_status_output():
+    assert ModeSpy(mode="headed").mode() == "headed"
+    assert ModeSpy(mode="launched").mode() == "launched"
