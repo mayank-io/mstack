@@ -1,6 +1,6 @@
 ---
 title: Orchestrator Collapse — one clip skill, per-source knowledge as templates
-status: draft
+status: complete
 created: 2026-08-24
 depends-on: 2026-08-24-notes-fetch-refactor.md
 ---
@@ -190,7 +190,7 @@ Ships: `notes:clip <youtube-url>` works end to end with no `*-to-obsidian` plugi
 
 | # | Status | What | Why deferred | Lands in |
 |---|---|---|---|---|
-| 12d | ↪️ | Exercise a real `pg gyaan` capture end to end: Whisper `medium` in Hindi, IST→PST conversion, date wikilinks, Hindi preserved in quotes. | Template *selection* is proven deterministically (5/5, §8 gate). What is unproven is the Hindi transcription path, which needs a live Hindi video and a slow local Whisper run — too long to sit inside M2's loop, and it verifies template *content* rather than the architecture M2 exists to prove. | **M4, task 28** |
+| 12d | ⚠️ | Exercise a real `pg gyaan` capture end to end: Whisper `medium` in Hindi, IST→PST conversion, date wikilinks, Hindi preserved in quotes. | Template *selection* is proven deterministically (5/5, §8 gate). What is unproven is the Hindi transcription path, which needs a live Hindi video and a slow local Whisper run — too long to sit inside M2's loop, and it verifies template *content* rather than the architecture M2 exists to prove. | **M4, task 28** |
 
 The distinction matters: M2's job was to show that one skill plus template data replaces three orchestrators. That is proven. Whether one particular template's Hindi settings work is a content question, and it belongs with the other end-to-end route checks in M4.
 
@@ -253,7 +253,7 @@ Ships: one repo owns capture; no cross-marketplace dependency; one entry point.
 | 25 | ✅ | **Receives 19d (§9.1)** — clip one real URL per route with the four `mk` plugins uninstalled: X thread with images, LinkedIn post with a followed link, Notion site, Scribd doc, arXiv paper, PDF, plain article. Confirm images at original resolution, the LinkedIn recursion produces two linked notes, and no skill 404s. | — |
 | 26 | ✅ | Commit and push both repos; rebase, no merge commits, no Claude Code signature | — |
 | 27 | ✅ | **Closes 1d (§7.2)** — author chose to re-decide rather than repoint. §5.3 rewritten to `fetch:x-account` + `templates/x-account.md` + a `clip` route; M5's two tasks rewritten from a retired plugin to a template; 79 path references updated. The plan was **architecturally** invalid, not just path-stale — its vault half targeted a plugin that no longer exists. | `mk:docs/` |
-| 28 | ⬜ | **Receives 12d (§8.2)** — clip a real `pg gyaan` video end to end: channel override selected, Whisper `medium`/`hi`, IST→PST table present, dates as wikilinks, Hindi preserved in quotes | — |
+| 28 | ⚠️ | **12d could not close** — both pg-gyaan videos are now members-only (§10.4). Channel detection and template selection verified; Hindi transcription unreachable. Moved to §12 with a reason, per the M4 gate. | — |
 
 ### 10.1 Route sweep (task 25)
 
@@ -270,6 +270,29 @@ Run live against the fetch layer, with the four `mk` plugins removed from disk, 
 | `fetch:linkedin-post` | ⚠️ **partial by LinkedIn's design** — author, date, metrics and comments captured; post body truncated to 203 chars. See §10.3 |
 
 Both previously-blocked routes now run. The sweep found a **fifth adapter bug** on the way: `$B wait` refuses a selector matching multiple elements, while Playwright's `waitForSelector` waits for the first — so `wait_for_selector("article")`, which opens every X capture, failed on every real X post. The adapter reported it as *"selector never appeared"*, the opposite of what happened, sending the reader to look for a page-load problem. Multiple matches are now treated as a pass.
+
+### 10.4 The Hindi path could not be exercised — the source is gated (task 28)
+
+Both pg-gyaan URLs in the vault are now **members-only** (`Camodity & nifty 15 days`). They were public when clipped in February 2026; the channel has since gated its back catalogue. All three extraction tiers fail on both, correctly and loudly.
+
+| What | Status |
+|---|---|
+| Channel detected as `pg gyaan` from metadata | ✅ |
+| Channel template selection | ✅ proven deterministically in M2 (5/5, including `PG ज्ञान`) |
+| `--whisper-model medium` accepted and Whisper attempted | ✅ |
+| **Hindi transcription, IST→PST table, date wikilinks** | ❌ **unreachable — no audio to transcribe** |
+
+**This is not a defect in the code.** It is a source that stopped being public. `12d` therefore cannot close against these URLs, and M4 cannot defer onward — so it moves to §12 with the reason stated there.
+
+**One avenue not pursued:** yt-dlp logged `Skipping client "android" since it does not support cookies`, so the cookie jar exported from the Chrome profile was never applied to the client that could have used it. If the user is a member of that channel, a cookie-capable client might reach the audio. Worth trying only if members-only capture is actually wanted — it is a different feature from this plan.
+
+### 10.5 A silent success on an empty transcript (found by task 28)
+
+The extractor emitted `OUTPUT_FILE:` after **all three tiers failed**, over a JSON whose `transcript` was `""`. A caller chaining on the marker — which is exactly what the contract instructs — would have read that file and written a note with an empty body, with nothing anywhere reporting a problem. The stderr log was loud; the machine-readable contract said success.
+
+Now: no marker, exit 3, and an explicit message. The JSON is still written because the metadata is worth keeping. Verified both directions — gated video exits 3 with no marker, public video exits 0 with one.
+
+**This is the fifth defect this milestone found by running things rather than reading them**, after the adapter's argument-dropping, its async silence, its destructive close, and its multiple-match wait failure. Every one of them reported success or nothing while doing the wrong thing.
 
 ### 10.3 LinkedIn permalink truncation — a limit, not a bug
 
@@ -359,6 +382,7 @@ uv run pytest plugins/notes/skills/clean-transcript/tests/ -v
 - Renaming `notes:clip`. It is the user-facing verb and stays.
 - The `edge-idea` collection system — designed, not built, tracked separately.
 - `fetch:vedic-chart` — reachable from `fetch:blog-post` and standalone, never a `clip` route.
+- **Hindi end-to-end verification (was deferral `12d`).** Both known pg-gyaan videos went members-only between the February 2026 clips and now, so the Hindi transcription path has no reachable test case. Channel detection and template selection are verified; the transcription itself is not. It will be exercised naturally by the next *public* pg-gyaan clip — no work is owed, only evidence. See §10.4.
 
 **Out of scope is not the same as deferred.** Items here are decided against; items in §13 are committed work with a named landing place. Moving something from §13 to §12 requires a stated reason.
 
@@ -369,7 +393,7 @@ Every ↪️ in this plan, and the task that closes it. **This table is the audi
 | Ref | Raised in | What | Closes in | Status |
 |---|---|---|---|---|
 | 1d | M1 §7.2 | `x-account-archive` plan still says `plugins/download/` | M4 task 27 | ✅ closed |
-| 12d | M2 §8.2 | Hindi `pg gyaan` capture never exercised end to end | M4 task 28 | ⬜ open |
+| 12d | M2 §8.2 | Hindi `pg gyaan` capture never exercised end to end | M4 task 28 | ⚠️ **moved to §12** — both source videos are now members-only (§10.4) |
 | 19d | M3 §9.1 | One real note per route never written | M4 task 25 | ✅ closed — 8/8 routes exercised; LinkedIn partial by its own design (§10.3) |
 
 ## 14. Log

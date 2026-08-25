@@ -821,6 +821,29 @@ async def main():
         output_path = Path(tempfile.gettempdir()) / f"yt_transcript_{video_id}.json"
 
     output_path.write_text(json.dumps(result, ensure_ascii=False, indent=2))
+
+    # --- Refuse to report success on an empty transcript ---
+    # All three tiers can fail (no captions, no transcript panel, yt-dlp
+    # refused) and still leave usable metadata. Emitting OUTPUT_FILE then is a
+    # lie the caller cannot detect: it chains on the marker, reads a JSON with
+    # transcript "", and writes a note with no content.
+    #
+    # Real case, 2026-08-24: a pg gyaan video had gone members-only. Every tier
+    # failed loudly in stderr, and the script still printed OUTPUT_FILE.
+    #
+    # The skill contract says an absent marker means STOP — so withhold it.
+    # The JSON is still written; the metadata is worth keeping.
+    if not (result.get("transcript") or "").strip():
+        print(
+            f"\nERROR: no transcript could be extracted for {video_id}. "
+            f"All three tiers failed — see the log above for which and why. "
+            f"Metadata was still written to {output_path}, but no OUTPUT_FILE "
+            f"marker is emitted, because a caller chaining on it would build a "
+            f"note with an empty body.",
+            file=sys.stderr,
+        )
+        sys.exit(3)
+
     print(f"\nOUTPUT_FILE:{output_path}", file=sys.stderr)
     # contract: final stdout line is machine-parseable
     print(f"OUTPUT_FILE:{output_path}")
