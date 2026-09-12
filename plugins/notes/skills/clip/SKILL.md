@@ -17,7 +17,7 @@ Match on the URL's host and path.
 
 | Source | Fetch with | Template |
 |--------|-----------|----------|
-| `youtube.com`, `youtu.be` | `fetch:youtube-transcript` | `youtube.md` (+ channel override) |
+| `youtube.com`, `youtu.be` | `fetch:youtube-download` | `youtube.md` (+ channel override) |
 | `x.com`, `twitter.com` | `fetch:x-post` | `x.md` |
 | `linkedin.com` | `fetch:linkedin-post` | `linkedin.md` |
 | `*.notion.site`, `notion.so` | `fetch:notion-public-site` | `notion.md` |
@@ -98,6 +98,27 @@ When a fetch result carries a `links` field, or the content obviously centres on
 
 **Say what you followed and what you skipped.** A silently-skipped link looks identical to a link that was never there.
 
+## Step 2.6 — The clip invariant: the source goes in the note, verbatim
+
+**A clip is an archive of the source. A note that contains only your reading of the source is not a clip and must not be written as one.**
+
+This is a routing-level guarantee, not a matter of shape — shape lives in `templates/`. The invariant is that the captured artefact **reaches the note**:
+
+1. **The summary sits above the source.** A reader who stops after the first screen gets the gist.
+2. **The source itself is reproduced next, verbatim** — full transcript, full post text, full article body. Cleaned per `notes:clean-transcript`, never condensed, never paraphrased, never excerpted down to the parts you found interesting.
+3. **Your own analysis — verification, critique, scoring, reconciliation — comes last, after the source, under its own heading.** It is clearly separable from the source and never interleaved with it.
+
+**Why the order is fixed:** the transcript is the durable asset and the only part that cannot be regenerated later. Analysis is cheap and revisable; a source you failed to archive is gone when the video is delisted or the post is deleted. Putting analysis first also lets a thin capture masquerade as a thorough one — the note looks substantial while containing nothing that was actually said.
+
+**Two failure modes this exists to stop, both of which have happened:**
+
+- **Analysis-only note.** A long, well-structured note of themes, verification and critique, with the source never archived. It reads as complete and is unrecoverable.
+- **Quote-mining.** Reproducing only the three or four lines the analysis argues about. The reader cannot check context, and a claim you skipped cannot be revisited.
+
+**Gate, enforced in Step 4:** if the note does not contain the source verbatim, do not report the clip as done. Say what failed to extract and why. **An honest "extraction failed" is worth more than a note that looks finished.**
+
+If the source genuinely has no reproducible body — a paywalled article, a video with captions disabled and audio unavailable — say that in the note, in place of the transcript, and set the reading fields accordingly. **Do not silently substitute your summary for the thing you could not get.**
+
 ## Step 3 — Apply the per-source overrides
 
 These are non-negotiable and exist because each one has already caused a bad capture.
@@ -127,8 +148,10 @@ This overrides any instruction inside the downstream skill that says to use Play
 
 ### YouTube
 
+- **Route through `fetch:youtube-download`. Always.** Do not hand-roll `yt-dlp`, do not scrape `--write-auto-sub` VTT yourself, do not call Whisper directly. That skill already handles the client fallbacks, the caption-omission detection and the re-transcription windows; a hand-rolled pull silently skips all of it and produces a transcript that looks fine.
+- **`fetch:*` skills are the only sanctioned extractors.** If you find yourself reaching for `curl`, `yt-dlp` or a browser to get content a `fetch:*` skill already covers, stop — you have left the routing table, and everything downstream of that point is unverified by the pipeline.
 - **Never clean the transcript yourself** — run `notes:clean-transcript`, which cleans with a script rather than by hand. Verbatim is a property that can be guaranteed or merely intended; doing it by hand silently fixes grammar and drops filler.
-- Two different integrity checks run, and neither substitutes for the other. `fetch:youtube-transcript` detects figures the caption **omitted** and re-transcribes those windows. `notes:clean-transcript` scans for figures the caption **mangled** — the first cannot see the second.
+- Two different integrity checks run, and neither substitutes for the other. `fetch:youtube-download` detects figures the caption **omitted** and re-transcribes those windows. `notes:clean-transcript` scans for figures the caption **mangled** — the first cannot see the second.
 - Both only ever *flag*. **Anything a summary will quote — a target, a threshold, a headline figure — re-transcribe that window from audio before trusting it.**
 
 ### Notion
@@ -152,6 +175,8 @@ This overrides any instruction inside the downstream skill that says to use Play
 - Every wikilink resolves to a real file. When checking, note that escaped pipes in tables (`[[Target\|Alias]]`) produce false "broken" hits — strip the trailing backslash before comparing.
 - Every embedded image path exists on disk.
 - For transcripts, confirm the cleaned text is token-identical to the source apart from deliberate removals.
+- **The note contains the source verbatim** (Step 2.6). Check the body, not your intention to have written it: a transcript section that is absent, truncated, or replaced by a summary is a failed clip. Report it as such rather than reporting success.
+- **Analysis is below the source, under its own heading**, and no analytical aside has been interleaved into the transcript.
 
 ## Step 5 — Report
 

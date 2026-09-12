@@ -110,7 +110,7 @@ The layer beneath `notes`. Each skill gets content out of one source and knows n
 
 | Skill | What it does |
 |---|---|
-| `fetch:youtube-transcript` | Transcript + metadata + chapters + speakers from a YouTube URL (persistent Chrome profile, Whisper fallback, caption-integrity verification) |
+| `fetch:youtube-download` | Transcript + metadata + chapters + speakers from a YouTube URL (persistent Chrome profile, Whisper fallback, caption-integrity verification) |
 | `fetch:x-post` | Single tweet, full thread, or X Article — auto-detects threads, walks back to the thread root, downloads images at original resolution |
 | `fetch:linkedin-post` | Post text, author, metrics, comments and attachments — expands the "… more" control and filters attachments from page furniture |
 | `fetch:blog-post` | Article to self-contained Markdown + images, recovering the lazy-loaded ones Defuddle drops |

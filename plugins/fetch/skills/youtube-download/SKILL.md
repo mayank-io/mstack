@@ -1,9 +1,9 @@
 ---
-name: youtube-transcript
-description: "Extract transcript and metadata from a YouTube video using the gstack browser session. Use when the user shares a youtube.com or youtu.be URL and wants the transcript, video metadata, chapters, or speakers."
+name: youtube-download
+description: "Download a YouTube video's transcript and metadata using the gstack browser session. Use when the user shares a youtube.com or youtu.be URL and wants the transcript, video metadata, chapters, or speakers."
 ---
 
-# Download YouTube Transcript
+# Download YouTube
 
 Extract the transcript and metadata from a YouTube video. The script tries three tiers in order: `youtube_transcript_api` (no browser), the gstack browser's transcript panel, then Whisper over the audio.
 
@@ -63,7 +63,7 @@ Parse the YouTube URL from `$ARGUMENTS`. The URL can be in various formats:
 Run the extraction script:
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/scripts/youtube_transcript_extractor.py" "<URL>"
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/youtube_downloader.py" "<URL>"
 ```
 
 Do not pass `--profile` or `--headless`; both are ignored.
@@ -77,7 +77,7 @@ OUTPUT_FILE:/var/folders/.../yt_transcript_abc123.json
 Strip the prefix before using it — do not consume the whole line as a path:
 
 ```bash
-last=$(python3 "${CLAUDE_PLUGIN_ROOT}/scripts/youtube_transcript_extractor.py" \
+last=$(python3 "${CLAUDE_PLUGIN_ROOT}/scripts/youtube_downloader.py" \
          "https://youtube.com/watch?v=abc123" | tail -1)
 case "$last" in
   OUTPUT_FILE:*) json="${last#OUTPUT_FILE:}" ;;

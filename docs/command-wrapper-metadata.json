@@ -75,9 +75,9 @@
     "argument_hint": "<X URL> [output_dir]",
     "command_description": "Extract content from an X/Twitter post, thread, or article using the gstack browser. Detects threads automatically and downloads images locally."
   },
-  "fetch:youtube-transcript": {
+  "fetch:youtube-download": {
     "argument_hint": "<YouTube URL> [output_dir]",
-    "command_description": "Extract transcript and metadata from a YouTube video using a persistent Chrome session"
+    "command_description": "Download transcript and metadata from a YouTube video using a persistent Chrome session"
   },
   "notes:clip": {
     "argument_hint": "<URL> [extra instructions]",

@@ -164,6 +164,79 @@ def fetch_oembed_metadata(video_url: str, video_id: str | None) -> dict:
         }
 
 
+def fetch_ytdlp_metadata(video_url: str) -> dict:
+    """Fetch the metadata oembed does not carry: description, duration, publish date.
+
+    oembed returns only title/channel/thumbnail. The rich fields used to come
+    solely from the browser tier's DOM scrape, so any run that succeeded on an
+    earlier tier silently produced an empty description — and because chapters
+    and speakers are both derived from the description, they came back empty
+    too. That looks identical to a video that genuinely has no chapters.
+
+    yt-dlp is already a dependency of the Whisper tier, so this adds no new one.
+    Returns {} on any failure: this is a gap-filler, never a hard requirement.
+    """
+    try:
+        proc = subprocess.run(
+            ['yt-dlp', '--no-update', '--skip-download', '--quiet', '--no-warnings', '-J', video_url],
+            capture_output=True, text=True, timeout=60,
+        )
+        if proc.returncode != 0 or not proc.stdout.strip():
+            print(f"yt-dlp metadata unavailable (rc={proc.returncode})", file=sys.stderr)
+            return {}
+        d = json.loads(proc.stdout)
+    except FileNotFoundError:
+        print("yt-dlp not installed — description/duration/published unavailable", file=sys.stderr)
+        return {}
+    except Exception as e:
+        print(f"yt-dlp metadata fetch failed: {e}", file=sys.stderr)
+        return {}
+
+    out = {}
+    if d.get('description'):
+        out['description'] = d['description']
+    if d.get('duration_string'):
+        out['duration'] = d['duration_string']
+    elif isinstance(d.get('duration'), (int, float)):
+        total = int(d['duration'])
+        h, rem = divmod(total, 3600)
+        m, sec = divmod(rem, 60)
+        out['duration'] = f"{h}:{m:02d}:{sec:02d}" if h else f"{m}:{sec:02d}"
+    if d.get('upload_date') and len(str(d['upload_date'])) == 8:
+        u = str(d['upload_date'])
+        out['published_date'] = f"{u[0:4]}-{u[4:6]}-{u[6:8]}"
+    for k_src, k_dst in (('view_count', 'view_count'), ('like_count', 'like_count'),
+                         ('channel_follower_count', 'channel_follower_count')):
+        if d.get(k_src) is not None:
+            out[k_dst] = d[k_src]
+    return out
+
+
+def enrich_metadata(metadata: dict, video_url: str) -> dict:
+    """Backfill missing metadata, then derive chapters and speakers from it.
+
+    Called on whichever tier produced the transcript, so the output shape does
+    not depend on which one won.
+    """
+    if not metadata.get('description') or not metadata.get('duration') \
+            or not metadata.get('published_date'):
+        for k, v in fetch_ytdlp_metadata(video_url).items():
+            if not metadata.get(k):
+                metadata[k] = v
+
+    desc = metadata.get('description', '') or ''
+    metadata['chapters'] = _extract_chapters(desc)
+    metadata['speakers'] = _extract_speakers(desc, metadata.get('title', '') or '')
+    if desc:
+        print(f"metadata: description {len(desc)} chars, "
+              f"{len(metadata['chapters'])} chapters, "
+              f"{len(metadata['speakers'])} speakers", file=sys.stderr)
+    else:
+        print("metadata: no description available — chapters/speakers will be empty",
+              file=sys.stderr)
+    return metadata
+
+
 def try_youtube_transcript_api(video_id: str) -> dict | None:
     """Primary method: fetch transcript via youtube_transcript_api (no browser)."""
     try:
@@ -858,15 +931,13 @@ async def main():
         if api_result and api_result.get('transcript'):
             transcript = api_result['transcript']
             language = api_result.get('language', _detect_language(transcript))
-            speakers = _extract_speakers('', metadata.get('title', ''))
+            metadata = enrich_metadata(metadata, args.url)
             result = {
                 **metadata,
                 'url': args.url,
                 'video_id': video_id,
                 'language': language,
                 'transcript': transcript,
-                'chapters': [],
-                'speakers': speakers,
             }
             print(f"Success via youtube_transcript_api", file=sys.stderr)
 

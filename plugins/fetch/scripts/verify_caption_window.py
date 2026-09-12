@@ -3,7 +3,7 @@
 Verify (re-transcribe) specific time windows of a YouTube video with Whisper.
 
 YouTube auto-captions silently drop words — especially numbers in Q&A — which
-produces confidently-wrong summaries. youtube_transcript_extractor.py flags the
+produces confidently-wrong summaries. youtube_downloader.py flags the
 suspect windows in its `caption_warnings`; this script recovers the real words
 for just those windows from the audio, instead of re-transcribing the whole
 video.

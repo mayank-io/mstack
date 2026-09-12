@@ -6,7 +6,7 @@ Downloads audio from YouTube using yt-dlp and transcribes using Whisper.
 Can be used standalone or as a fallback when native YouTube transcripts are unavailable.
 
 No browser: yt-dlp fetches the audio directly. Member-only videos need a cookie
-jar, which youtube_transcript_extractor.py exports from the headed gstack
+jar, which youtube_downloader.py exports from the headed gstack
 session and passes in via --cookies. There was never a --chrome-profile option;
 the docstring advertised one for months.
 
@@ -14,7 +14,7 @@ Usage:
     python3 whisper_transcriber.py <video_url_or_id> [--model medium] [--language auto] [--cookies PATH]
 
 Output:
-    Prints path to JSON file with transcript in same format as youtube_transcript_extractor.py
+    Prints path to JSON file with transcript in same format as youtube_downloader.py
 """
 
 import argparse

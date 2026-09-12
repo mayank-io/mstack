@@ -31,7 +31,7 @@ ROUTED = [
     # login, and silently signed out again whenever those cookies expired. A
     # members-only video then renders a watch page with no "Show transcript"
     # button, which is indistinguishable from a video that has no captions.
-    "youtube_transcript_extractor.py",
+    "youtube_downloader.py",
 ]
 
 

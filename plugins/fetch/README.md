@@ -34,7 +34,7 @@ Emit exactly one such line, last. Human-readable progress may precede it and is 
 
 ### Return raw
 
-A fetch skill retrieves; it does not shape. Cleaning is opinionated and lossy — paragraph breaks, chapter headings, noise-marker removal — and different callers want different things. **Raw can always be re-cleaned; cleaned can never be un-cleaned.** `fetch:youtube-transcript` therefore returns timestamped raw text, and `notes:clean-transcript` cleans it.
+A fetch skill retrieves; it does not shape. Cleaning is opinionated and lossy — paragraph breaks, chapter headings, noise-marker removal — and different callers want different things. **Raw can always be re-cleaned; cleaned can never be un-cleaned.** `fetch:youtube-download` therefore returns timestamped raw text, and `notes:clean-transcript` cleans it.
 
 The line is *fidelity* versus *readability*. Re-transcribing a window because the caption dropped a figure belongs here — it makes the content more faithful to the source. Inserting paragraph breaks does not.
 
@@ -92,19 +92,19 @@ Download all pages from a public Notion site as Markdown files with cross-refere
 
 ---
 
-### `/fetch:youtube-transcript`
+### `/fetch:youtube-download`
 
 Extract transcript and metadata from a YouTube video using a persistent Chrome session.
 
 **Usage:**
 ```bash
-/fetch:youtube-transcript <YouTube URL> [output_dir]
+/fetch:youtube-download <YouTube URL> [output_dir]
 ```
 
 **Example:**
 ```bash
 # First run - opens browser for login
-/fetch:youtube-transcript https://www.youtube.com/watch?v=dQw4w9WgXcQ
+/fetch:youtube-download https://www.youtube.com/watch?v=dQw4w9WgXcQ
 
 ```
 

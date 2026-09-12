@@ -32,7 +32,7 @@ One flow, one conditional, for every route:
 
 | Source | Fetch with | Template |
 |---|---|---|
-| YouTube | `fetch:youtube-transcript` | `youtube.md` (+ channel override) |
+| YouTube | `fetch:youtube-download` | `youtube.md` (+ channel override) |
 | X / Twitter | `fetch:x-post` | `x.md` |
 | LinkedIn | `fetch:linkedin-post` | `linkedin.md` |
 | Notion site | `fetch:notion-public-site` | `notion.md` |

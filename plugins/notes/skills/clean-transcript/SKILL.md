@@ -1,6 +1,6 @@
 ---
 name: clean-transcript
-description: "Turn a raw transcript into readable verbatim Markdown — strip timestamps, merge fragmented lines, insert paragraph breaks and chapter headings. Use when the user says \"clean this transcript\", \"format this transcript\", or after fetch:youtube-transcript hands back raw timestamped text. Guarantees the output is word-for-word identical to the input."
+description: "Turn a raw transcript into readable verbatim Markdown — strip timestamps, merge fragmented lines, insert paragraph breaks and chapter headings. Use when the user says \"clean this transcript\", \"format this transcript\", or after fetch:youtube-download hands back raw timestamped text. Guarantees the output is word-for-word identical to the input."
 ---
 
 # Clean Transcript
@@ -16,7 +16,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/skills/clean-transcript/scripts/clean.py" \
 
 | Argument | Meaning |
 |---|---|
-| `RAW.txt` | raw transcript text — the `transcript` field from `fetch:youtube-transcript`, written to a file |
+| `RAW.txt` | raw transcript text — the `transcript` field from `fetch:youtube-download`, written to a file |
 | `OUT.md` | where the cleaned Markdown goes |
 | `META.json` *(optional)* | JSON with a `chapters` array; each entry needs `start_time` (or `seconds`) and `title` |
 | `--speakers` *(optional)* | comma-separated names whose **already-present** labels get bolded |
@@ -35,13 +35,13 @@ It prints `segments:`, `chapters inserted:`, `chars out:` and any corruption war
 
 ## Corruption scan
 
-`caption_warnings` from `fetch:youtube-transcript` detects figures the caption **omitted**. It cannot see one it **mangled** — `$und00` where the speaker said `$1,050`, or `a,50` for `1,050`. This script scans the cleaned text for those signatures and reports them on stderr:
+`caption_warnings` from `fetch:youtube-download` detects figures the caption **omitted**. It cannot see one it **mangled** — `$und00` where the speaker said `$1,050`, or `a,50` for `1,050`. This script scans the cleaned text for those signatures and reports them on stderr:
 
 - a currency symbol not followed by a digit
 - letters immediately before a comma-number, or digits immediately before comma-letters
 - `%` whose nearest preceding non-space character is not a digit
 
-**Any flagged figure that a summary will quote — a price target, a threshold, a headline number — must be re-transcribed from audio before you trust it.** Use the caption-verification procedure in `fetch:youtube-transcript`. A mangled figure reads as authoritative, which is what makes it dangerous: one such corruption (`a,50` for `$1,050`) once carried an entire gold price target.
+**Any flagged figure that a summary will quote — a price target, a threshold, a headline number — must be re-transcribed from audio before you trust it.** Use the caption-verification procedure in `fetch:youtube-download`. A mangled figure reads as authoritative, which is what makes it dangerous: one such corruption (`a,50` for `$1,050`) once carried an entire gold price target.
 
 The scan is heuristic. It flags candidates; it does not prove corruption, and it will not catch every case.
 

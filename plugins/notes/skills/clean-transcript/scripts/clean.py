@@ -35,7 +35,7 @@ NOISE = re.compile(
 PARA_MIN_CHARS = 700
 SENT_END = (".", "?", "!", '"', "”")
 
-# Corruption signatures. caption_warnings (in fetch:youtube-transcript) detects
+# Corruption signatures. caption_warnings (in fetch:youtube-download) detects
 # figures the caption OMITTED; it cannot see one it MANGLED. These do.
 # Real cases seen: "$und00" for "$1,050", "a,50" for "1,050".
 CORRUPTION = [
