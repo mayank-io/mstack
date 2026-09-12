@@ -48,6 +48,41 @@ Reading it is not optional and neither is acting on it. Delegation here has sile
 
 **Links in the body** — if the vault documents an entity-linking rule (stock tickers as `[[$AAPL]]`, people as `[[@Name]]`, dates as `[[YYYY-MM-DD]]`), apply it to the content you were handed. The caller supplies text; converting bare mentions into the vault's link syntax is this skill's job, because this skill is the one that read the conventions.
 
+### Entity linking — scan, resolve, then create
+
+**Run these in order. Each step exists because skipping it has produced a wrong note.**
+
+**1. Scan for company and organisation NAMES, not for ticker-shaped strings.** Every company named in the body is a candidate for a page and a link. A note about "SpaceX" that links `[[$NVDA]]` because *that* one was already written as a symbol, while leaving the actual subject unlinked, is the failure this step prevents. Read the content for entities; do not pattern-match for `$`.
+
+**2. Resolve the official symbol before writing any link. A ticker is a fact to look up, never a string to construct.**
+
+```bash
+# Authoritative for US listings. A descriptive User-Agent is REQUIRED — SEC returns 403 without one.
+curl -sL --max-time 30 -A '<you>@<domain> research' https://www.sec.gov/files/company_tickers.json \
+  | python3 -c "import sys,json;[print(str(v['cik_str']).zfill(10),v['ticker'],v['title']) for v in json.load(sys.stdin).values() if '<COMPANY>' in v['title'].upper()]"
+
+# Cross-check the symbol actually trades.
+curl -s -A 'Mozilla/5.0' "https://query1.finance.yahoo.com/v8/finance/chart/<SYM>?range=1d&interval=1d"
+#   -> meta.instrumentType == "EQUITY", meta.longName, meta.fullExchangeName
+```
+
+**The symbol is frequently not an abbreviation of the name.** Space Exploration Technologies Corp. trades as **`SPCX`**, not `SPACEX`. Guessing produced a duplicate page, a wrong "private company" framing, and a note asserting that figures were unverifiable when a 10-Q had already been filed.
+
+**3. Search existing pages by `name:` and `aliases:`, NEVER by filename.**
+
+```bash
+grep -ril "<company name>" Notes/Tickers/     # matches frontmatter name/aliases
+# NOT: ls Notes/Tickers/ | grep '^\$SPACEX\.md'   # returns nothing, looks like "no page exists"
+```
+
+A filename search answers "is there a page named after my guess", which is a different question from "does this company have a page". The page for SpaceX is `$SPCX.md`, and its frontmatter carries `name: SpaceX` plus `aliases: ["SpaceX", "Space Exploration Technologies"]` — precisely so a name search finds it.
+
+**4. Create a page only after both 2 and 3 come back empty**, from the vault's ticker template. Carry the resolved symbol, and set `aliases:` to every name the company is called in the wild, so the next scan finds it by step 3.
+
+**5. Never invent a symbol as a placeholder.** If a public company's symbol cannot be resolved, say so and leave the mention unlinked rather than minting one — an invented symbol becomes a duplicate page that later has to be found and merged. If no symbol exists because the company is private, follow the vault's private-company convention; if the vault documents none, ask rather than inventing.
+
+**6. Link every resolved entity**, including in frontmatter where the vault uses a `tickers:` field.
+
 ## Step 4 — Write the file
 
 ## Step 5 — Link it into today's daily note
