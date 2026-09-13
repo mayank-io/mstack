@@ -87,32 +87,41 @@ The control is **not always present**, and where it appears depends on the surfa
 
 Hashed classes, and **`aria-label` is empty**. Every class-based or aria-based selector fails silently — it matches nothing and reports zero expanders, which is indistinguishable from a post that needed no expansion. The only stable signal is the **button's text: `… more`**.
 
-Match it exactly. A loose `/more/i` also catches `"More actions for <company>"`, which opens a menu:
+Match it exactly, and **require either the ellipsis or the verb**. Making both optional is the trap: `/^(…|\.\.\.)?\s*(see|show)?\s*more$/i` collapses to `/^more$/i`, which matches LinkedIn's **global footer "More" dropdown** on every page. Anchoring alone is not enough — it kills `"More actions for <company>"` but not bare `"More"`.
 
 ```javascript
 () => {
-  let n = 0;
+  const clicked = [];
   Array.from(document.querySelectorAll('button')).forEach(b => {
     const t = (b.innerText || '').trim();
-    if (!/^(…|\.\.\.)?\s*(see|show)?\s*more$/i.test(t)) return;   // exact, not "More actions for X"
-    if (b.closest('.comments-comment-item, .comments-comment-entity')) return;  // comments, not body
-    b.click(); n++;
+    // ellipsis form ("…more") OR verb form ("see more"/"show more") — never bare "More"
+    if (!/^(?:…|\.\.\.)\s*more$|^(?:see|show)\s+more$/i.test(t)) return;
+    const inComment = !!b.closest('[class*="comments-comment"]');   // comments, not body
+    if (inComment) return;
+    b.click();
+    clicked.push(t);
   });
-  return n;
+  return clicked;                 // WHAT was clicked, not just how many
 }
 ```
+
+**Return the clicked labels, not a count.** A bare `n` is an unfalsifiable success signal: a loop clicking the wrong control forever looks identical to one doing real work. `["More"]` in the result is visibly wrong on sight; `1` is not.
 
 ### Loop until no expanders remain — one pass is not enough
 
 Expanding reveals **more posts**, each with its own control. Measured on a real company listing: round 1 clicked 3, which surfaced 10 more; round 2 clicked those 10; round 3 found none.
 
 ```python
+rounds = []
 for _ in range(8):
-    n = await page.evaluate(EXPAND_JS)
-    if n == 0:
+    clicked = await page.evaluate(EXPAND_JS)
+    rounds.append(clicked)
+    if not clicked:
         break                       # converged
     await page.wait_for_timeout(1800)
 ```
+
+**Read `rounds` before trusting the result.** The same label repeating every round with no character growth means you are re-clicking one control that does nothing — site chrome, not the body.
 
 **Verified 2026-08-24** on `linkedin.com/company/kodiakai/posts/`: 13 expanders over 3 rounds, body **5,725 → 11,628 characters — 2× the text**. Stopping after one pass would have captured roughly half the page and looked complete.
 
@@ -130,11 +139,24 @@ Use `"$B" snapshot` for the accessibility tree, and `$B js` for anything structu
 |---|---|
 | `author_name` | display name |
 | `author_headline` | title / company line beneath the name |
-| `date` | LinkedIn shows a relative age ("2w"); resolve to an absolute date where possible and say so when you cannot |
+| `date` | LinkedIn shows a relative age ("2w") — **resolve it from the activity ID, not the label** (see below) |
 | `text` | **the expanded text** — verify "…see more" is gone |
 | `images` | post images, at the largest available resolution |
 | `metrics` | likes, comments, reposts |
 | `links` | every URL in the post body **and** in any link-preview card |
+
+### Resolving the date
+
+**Do not report LinkedIn's relative label as the post date.** Decode the **activity ID** in the URL — `linkedin.com/posts/<slug>-<id>-<code>` or `/feed/update/urn:li:activity:<id>`:
+
+```python
+from datetime import datetime, timezone
+datetime.fromtimestamp((int(activity_id) >> 22) / 1000, timezone.utc)   # no epoch offset
+```
+
+Unlike Twitter's snowflake this needs **no epoch offset** — `id >> 22` is epoch milliseconds directly. Corroborate against the upload timestamp embedded in the attachment's CDN path (`/feedshare-shrink_800/<blob>/0/<epoch_ms>?…`); the two should agree to within seconds.
+
+**The relative label can reflect an edit, not the post.** Verified 2026-09-13: a post displaying `1d • Edited` decoded to 2026-09-11 16:00:49 UTC — two days old. Report the decoded date and note the edit separately.
 
 **Return `links` — do not follow them.** Recursing into shared content is `notes:clip`'s job; a fetch skill that pulls in a YouTube video has stopped being a fetch skill. Capture the preview card's title, description and image too: it is often the only trace left when the target link rots.
 
@@ -174,7 +196,17 @@ Measured 2026-08-24 against the live site:
 
 ### Ask for the largest rendition
 
-LinkedIn encodes the rendition in the path — `image-shrink_800` is a downscale. Rewrite the size upward before downloading and fall back if the larger one 404s:
+LinkedIn encodes the rendition in the path — `image-shrink_800` is a downscale. Same reasoning as requesting `name=orig` on X: **a downscaled image is unreadable exactly when it matters** — a list, a table, a chart, a screenshot of text.
+
+**Read `srcset` first — rewriting a signed URL does not work.** `feedshare-shrink_*` URLs carry `e=` (expiry) and `t=` (signature) bound to the exact path, so changing the size invalidates the signature:
+
+```javascript
+() => Array.from(document.querySelectorAll('img'))
+  .filter(i => /feedshare|image-shrink_/.test(i.currentSrc || i.src || ''))
+  .map(i => ({src: i.currentSrc || i.src, srcset: i.srcset || '', w: i.naturalWidth, h: i.naturalHeight}))
+```
+
+Take the largest candidate `srcset` offers. Only if there is none, try the path rewrite — it may still work on unsigned `image-shrink_` URLs — and fall back:
 
 ```bash
 big="${url/image-shrink_800/image-shrink_1280}"
@@ -182,11 +214,15 @@ curl -fsL -o "<output_dir>/linkedin-<author>-<n>.jpg" "$big" \
   || curl -fsL -o "<output_dir>/linkedin-<author>-<n>.jpg" "$url"
 ```
 
-Same reasoning as requesting `name=orig` on X: **a downscaled image is unreadable exactly when it matters** — a list, a table, a chart, a screenshot of text.
+**Report the pixel dimensions you actually got.** Verified 2026-09-13: on a signed `feedshare-shrink_800` URL with no `srcset`, both `_1280` and `_2048` failed and 800×1000 was the ceiling. That is a fine outcome — silently presenting it as full resolution is not. Say the cap was hit so a reader knows the transcription came from an upscale.
 
 ### Carousels and documents
 
-A post can attach a multi-page PDF carousel (`.native-document`, `[class*=carousel]`) rather than a single image. Those paginate — capture **every** page, and report the page count. One page of a twelve-page carousel is not the attachment.
+A post can attach a multi-page PDF carousel rather than a single image. Those paginate — capture **every** page, and report the page count. One page of a twelve-page carousel is not the attachment.
+
+**Detect with `.native-document, [class*="document-s-container"]`, corroborated by an `N / M` page counter in the page text.**
+
+⚠️ **Never use `[class*=carousel]`.** It matches `feed-shared-update-v2--with-carousel-fix` — a CSS bugfix class LinkedIn puts on *every* update, carousel or not. Verified 2026-09-13: it reported a carousel on an ordinary single-image post. A false positive here sends you hunting for pages that do not exist, or worse, reporting "1 of N captured" for a post with one image.
 
 ### When curl is refused
 
