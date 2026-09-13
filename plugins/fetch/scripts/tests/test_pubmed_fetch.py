@@ -454,3 +454,38 @@ def test_data_lands_under_the_header_it_belongs_to():
 def test_a_malformed_span_attribute_does_not_crash_the_parse():
     xml = SPANNED_TABLE_XML.replace(b'colspan="2"', b'colspan="oops"')
     assert pubmed_fetch.parse_pmc(xml)["tables"][0]["rows"]
+
+
+# ------------------------------------------------- a table split across a break
+
+SPLIT_TABLE_XML = b"""<?xml version="1.0"?>
+<article><front><article-meta>
+  <article-id pub-id-type="pmid">26041386</article-id>
+</article-meta></front>
+<body><sec><title>RESULTS</title><p>Text.
+  <table-wrap><label>Table 2</label><caption><p>Sixteen conditions.</p></caption>
+    <table><tbody>
+      <tr><th>Condition</th><th>N</th></tr>
+      <tr><td>Atrial fibrillation</td><td>48 961</td></tr>
+    </tbody></table>
+    <table><tbody>
+      <tr><td>Prostate neoplasm</td><td>20 353</td></tr>
+      <tr><td>Vomiting</td><td>11 000</td></tr>
+    </tbody></table>
+  </table-wrap></p></sec></body></article>"""
+
+
+def test_a_table_split_across_a_page_break_keeps_every_block():
+    """PMC emits several <table> elements in one <table-wrap> when the original
+    broke across a page. Taking only the first drops rows from a table that
+    still looks complete — Table 2 of PMID 26041386 loses 7 of 16 conditions."""
+    rows = pubmed_fetch.parse_pmc(SPLIT_TABLE_XML)["tables"][0]["rows"]
+    assert [r[0] for r in rows] == [
+        "Condition", "Atrial fibrillation", "Prostate neoplasm", "Vomiting"]
+
+
+def test_split_blocks_are_padded_to_one_width():
+    xml = SPLIT_TABLE_XML.replace(b"<td>Vomiting</td><td>11 000</td>",
+                                  b"<td>Vomiting</td><td>11 000</td><td>extra</td>")
+    rows = pubmed_fetch.parse_pmc(xml)["tables"][0]["rows"]
+    assert {len(r) for r in rows} == {3}

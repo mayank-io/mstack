@@ -321,30 +321,42 @@ def _parse_table(table_wrap) -> list[list[str]]:
     "High"/"Low" under "EHR Condition" and "N" — every column label wrong, in a
     table that still looks perfectly well-formed.
     """
-    table = table_wrap.find(".//table")
-    if table is None:
+    # ALL of them, not the first. PMC splits a table that broke across a page in
+    # the original layout into several <table> elements inside one <table-wrap>:
+    # Table 2 of PMID 26041386 is 12 rows + 10 rows. find(".//table") returns the
+    # first and silently drops the rest, leaving a table that looks complete and
+    # is missing seven of its sixteen conditions.
+    tables = table_wrap.findall(".//table")
+    if not tables:
         return []
 
-    grid: dict[tuple[int, int], str] = {}
-    taken: set[tuple[int, int]] = set()
-    height = 0
-    for r, tr in enumerate(table.iter("tr")):
-        height = r + 1
-        c = 0
-        for cell in (e for e in tr if e.tag in ("th", "td")):
-            while (r, c) in taken:
-                c += 1
-            cols, rows_ = _span(cell, "colspan"), _span(cell, "rowspan")
-            grid[(r, c)] = _text(cell)
-            for dr in range(rows_):
-                for dc in range(cols):
-                    taken.add((r + dr, c + dc))
-            c += cols
+    blocks = []
+    for table in tables:
+        # Spans are resolved per <table>: a rowspan cannot reach across a break.
+        grid: dict[tuple[int, int], str] = {}
+        taken: set[tuple[int, int]] = set()
+        height = 0
+        for r, tr in enumerate(table.iter("tr")):
+            height = r + 1
+            c = 0
+            for cell in (e for e in tr if e.tag in ("th", "td")):
+                while (r, c) in taken:
+                    c += 1
+                cols, rows_ = _span(cell, "colspan"), _span(cell, "rowspan")
+                grid[(r, c)] = _text(cell)
+                for dr in range(rows_):
+                    for dc in range(cols):
+                        taken.add((r + dr, c + dc))
+                c += cols
+        if not grid:
+            continue
+        width = max(c for _, c in taken) + 1
+        blocks.append([[grid.get((r, c), "") for c in range(width)] for r in range(height)])
 
-    if not grid:
+    if not blocks:
         return []
-    width = max(c for _, c in taken) + 1
-    out = [[grid.get((r, c), "") for c in range(width)] for r in range(height)]
+    width = max(len(row) for b in blocks for row in b)
+    out = [row + [""] * (width - len(row)) for b in blocks for row in b]
     return [row for row in out if any(row)]
 
 
