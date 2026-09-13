@@ -17,6 +17,7 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 
 _CANDIDATES = [
     os.path.expanduser("~/.claude/skills/gstack/browse/dist/browse"),
@@ -204,7 +205,7 @@ class BrowsePage:
 
     # -- Playwright-shaped surface ---------------------------------------
 
-    async def goto(self, url: str, wait_until: str = None, **_):
+    def goto_sync(self, url: str, wait_until: str = None, **_):
         self._run("goto", url, timeout=180)
         if wait_until == "networkidle":
             try:
@@ -212,7 +213,10 @@ class BrowsePage:
             except BrowseError:
                 pass  # best-effort, same as Playwright's soft timeout
 
-    async def wait_for_selector(self, selector: str, timeout: int = 15000, **_):
+    async def goto(self, url: str, wait_until: str = None, **_):
+        self.goto_sync(url, wait_until=wait_until)
+
+    def wait_for_selector_sync(self, selector: str, timeout: int = 15000, **_):
         """Wait for a selector, matching Playwright's semantics.
 
         `$B wait` refuses a selector that matches more than one element
@@ -233,12 +237,15 @@ class BrowsePage:
                 return  # present, several times over — that is a pass
             raise BrowseError(f"selector never appeared: {selector} ({e})")
 
+    async def wait_for_selector(self, selector: str, timeout: int = 15000, **_):
+        self.wait_for_selector_sync(selector, timeout=timeout)
+
     async def wait_for_timeout(self, ms: int):
         """Playwright's page.waitForTimeout, in ms. Present so callers written
         in Playwright idiom do not have to be rewritten."""
         await asyncio.sleep(ms / 1000)
 
-    async def evaluate(self, expression: str, *args):
+    def evaluate_sync(self, expression: str, *args):
         """Evaluate JS and return a Python value, like Playwright's page.evaluate.
 
         Two differences from a raw `$B js` call, both restoring Playwright
@@ -305,6 +312,20 @@ class BrowsePage:
                 return raw
         return raw
 
+    async def evaluate(self, expression: str, *args):
+        return self.evaluate_sync(expression, *args)
+
+    def current_url(self) -> str:
+        """The URL the browser is on right now (`$B url`).
+
+        Playwright exposes this as the `page.url` attribute; `SyncBrowsePage`
+        re-exposes it under that name so scripts written against Playwright's
+        sync API do not have to special-case the adapter.
+        """
+        out = self._run("url", timeout=60)
+        lines = [ln.strip() for ln in out.splitlines() if ln.strip()]
+        return lines[-1] if lines else ""
+
 
 class browse_page:
     """`async with browse_page() as page:` — mirrors the async_playwright() block."""
@@ -317,5 +338,62 @@ class browse_page:
         return self._page
 
     async def __aexit__(self, *exc):
+        self._page.close()
+        return False
+
+
+class SyncBrowsePage:
+    """Blocking mirror of `BrowsePage`, shaped like Playwright's **sync** API.
+
+    `x_extract` / `xpost_download` were written against `playwright.sync_api`:
+    they call `page.evaluate(...)` for a value, read `page.url` as an
+    attribute, and sleep with `time.sleep`. `BrowsePage`'s surface is `async`,
+    so handing those modules a `BrowsePage` gives them coroutine objects that
+    are never awaited — every extraction would come back empty, which is
+    exactly the silent-success failure this adapter exists to prevent.
+
+    This wraps the same `BrowsePage` (same `connect()`, same headed-mode
+    enforcement, same `$B` process) and exposes the sync names on top of the
+    `*_sync` cores, so there is one implementation, not two.
+    """
+
+    def __init__(self, page: "BrowsePage"):
+        self._page = page
+
+    @property
+    def url(self) -> str:
+        return self._page.current_url()
+
+    def goto(self, url: str, **kwargs):
+        return self._page.goto_sync(url, wait_until=kwargs.get("wait_until"))
+
+    def wait_for_selector(self, selector: str, timeout: int = 15000, **_):
+        return self._page.wait_for_selector_sync(selector, timeout=timeout)
+
+    def wait_for_timeout(self, ms: int):
+        time.sleep(ms / 1000)
+
+    def evaluate(self, expression: str, *args):
+        return self._page.evaluate_sync(expression, *args)
+
+    def cookies(self) -> list:
+        return self._page.cookies()
+
+
+class sync_browse_page:
+    """`with sync_browse_page() as page:` — the sync twin of `browse_page()`.
+
+    Same guarantees: connects the gstack daemon, refuses anything but `headed`
+    mode, and never disconnects on exit.
+    """
+
+    def __init__(self, quiet: bool = False):
+        self._page = BrowsePage(quiet=quiet)
+
+    def __enter__(self) -> SyncBrowsePage:
+        self._page.connect()
+        return SyncBrowsePage(self._page)
+
+    def __exit__(self, *exc):
         self._page.close()
         return False

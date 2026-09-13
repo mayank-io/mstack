@@ -17,11 +17,19 @@ _EXTRACTION_JS_PATH = os.path.normpath(os.path.join(
 with open(_EXTRACTION_JS_PATH) as _f:
     _EXTRACTION_JS = _f.read()
 
+# The file is a bare IIFE statement, and the gstack adapter wraps whatever it is
+# given in `JSON.stringify((...))` — a statement with a trailing semicolon inside
+# parentheses is a syntax error, and the injection would fail with no extraction
+# functions on the page. Handing it a function literal instead makes the file a
+# block body, which is legal in both drivers, and returning the typeof gives the
+# caller a positive confirmation that the injection took.
+_INJECT_JS = "() => {\n" + _EXTRACTION_JS + "\nreturn typeof window.__xExtract;\n}"
+
 
 def _ensure(page):
     """Inject the canonical extraction.js if not already present on this doc."""
     if page.evaluate("typeof window.__xExtract") != "object":
-        page.evaluate(_EXTRACTION_JS)
+        page.evaluate(_INJECT_JS)
 
 
 def _normalize(d, handle, status_id):
@@ -58,7 +66,7 @@ def collect_thread_posts(page, handle, root_id, scrolls=14):
     stable = 0
     for _ in range(scrolls):
         _ensure(page)
-        for pd in (page.evaluate("h => window.__xExtract.extractAllByAuthor(h)", handle) or []):
+        for pd in (page.evaluate("(h) => window.__xExtract.extractAllByAuthor(h)", handle) or []):
             sid = pd.get("statusId")
             if sid and sid not in collected and (pd.get("content") or "").strip():
                 collected[sid] = pd

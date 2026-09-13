@@ -1,7 +1,7 @@
 /*
  * CANONICAL X post/thread extraction — SINGLE SOURCE OF TRUTH.
  *
- * Both the `download:x-post` skill AND the `x-account` bulk harvester load and
+ * Both the `fetch:x-post` skill AND the `x-account` bulk harvester load and
  * call THIS file. Do not copy these functions elsewhere: iterate here once and
  * every consumer benefits. (Design Approach C — shared extraction reference.)
  *
@@ -80,10 +80,14 @@
     const g = article.querySelector('[role="group"][aria-label]');
     const metrics = parseMetrics((g && g.getAttribute('aria-label')) || '');
 
+    // Always request the ORIGINAL resolution, never 'large'. X serves
+    // &name=small/medium/large as downscales; only 'orig' is the full-resolution
+    // file, and a downscaled chart or screenshot is often unreadable at exactly
+    // the point it matters.
     const photoLinks = article.querySelectorAll('a[href*="/photo/"]');
     const images = Array.from(article.querySelectorAll('img'))
       .filter((img) => img.src && img.src.includes('pbs.twimg.com/media'))
-      .map((img) => img.src.replace(/name=\w+/, 'name=large'));
+      .map((img) => img.src.replace(/name=\w+/, 'name=orig'));
 
     return { statusId: statusIdOf(article), handle, displayName, content, timestamp, metrics,
              expectedImageCount: photoLinks.length, images };
@@ -148,6 +152,49 @@
     return posts;
   }
 
+  // Media-load gate. X mounts <img alt="Image"> before the pbs.twimg.com src
+  // is set, so extracting the instant `article` appears returns zero images for
+  // a post that has four. Poll this from the DRIVER (synchronously, between
+  // waits) rather than awaiting inside the page: `$B js` returns before a
+  // promise resolves, so an in-page sleep loses the result silently.
+  function imagesReady() {
+    const article = document.querySelector('article');
+    if (!article) return true;
+    const imgs = article.querySelectorAll('img[alt="Image"]');
+    if (imgs.length === 0) return true;
+    return Array.from(imgs).every((img) => img.src && img.src.includes('pbs.twimg.com/media'));
+  }
+
+  // X Articles (long-form). A regular tweet has [data-testid="tweetText"]; an
+  // Article does not, so extractArticle() returns content:'' for a 40k-character
+  // essay — emptiness is the DETECTION SIGNAL, not a result.
+  //
+  // Read from the DOM, not from an accessibility snapshot: the snapshot of one
+  // measured article was 53,899 bytes and flattened the heading/body
+  // relationship the caller needs to rebuild sections.
+  //
+  // `body` arrives as ONE block and the headings are ALSO inside it — the
+  // heading list is an index, not content to concatenate. Appending headings to
+  // the body duplicates every one; rendering only the headings loses the
+  // article. Split the body on its own headings, in document order.
+  function extractLongform() {
+    const root = document.querySelector('[data-testid=twitterArticleRichTextView]');
+    if (!root) return { error: 'not an article' };
+    const body = root.querySelector('[data-testid=longformRichTextComponent]');
+    return {
+      body: body ? body.innerText : '',
+      headings: Array.from(root.querySelectorAll('h1,h2,h3'))
+        .map((h) => ({ level: h.tagName.toLowerCase(), text: h.innerText.trim() }))
+        .filter((h) => h.text),
+      links: Array.from(root.querySelectorAll('a[href^="http"]'))
+        .map((a) => ({ text: (a.innerText || '').trim(), href: a.href })),
+      images: Array.from(root.querySelectorAll('img'))
+        .map((i) => i.src).filter((s) => s && s.includes('pbs.twimg.com/media'))
+        .map((s) => s.replace(/name=\w+/, 'name=orig'))
+    };
+  }
+
   window.__xExtract = { extractFocal, extractArticle, extractAllByAuthor,
-                        findRoot, detectThreadMembers, statusIdOf, handleOf };
+                        findRoot, detectThreadMembers, extractLongform,
+                        imagesReady, statusIdOf, handleOf };
 })();

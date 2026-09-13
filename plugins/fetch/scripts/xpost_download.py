@@ -1,19 +1,39 @@
 """x-post DOWNLOAD unit — the single reusable capability.
 
-Given a Playwright page that is ON a post (e.g. a URL opened directly, or a
-post opened in a new tab by the x-account iterator), capture the whole
-post/thread to a Markdown note (+ images). This is THE download logic; the
-x-account plugin does not reimplement any of it — it opens a tab and calls
+Given a page that is ON a post (e.g. a URL opened directly, or a post opened in
+a new tab by the x-account iterator), capture the whole post/thread to a
+Markdown note (+ images). This is THE download logic; the x-account iterator
+does not reimplement any of it — it opens a tab and calls
 download_open_post(). Uses the shared extraction (x_extract -> extraction.js)
 and the shared renderer (x_render) and media downloader.
+
+Two ways in:
+
+* **As a library** — `download_open_post(page, handle, out_dir, day)`, given a
+  page already on the post. This is what the x-account iterator calls.
+* **As a CLI** — `python3 xpost_download.py <url> [out_dir]`, which opens the
+  gstack browser (headed, carrying the user's logins) via
+  `_browse.sync_browse_page()`, walks back to the thread root, and captures.
+  This is what the `fetch:x-post` skill runs.
+
+The CLI never launches its own browser. A freshly launched one is logged out,
+and X then returns a login wall that reads as a *short post* rather than an
+error — a capture that looks fine and is empty.
 """
+import datetime
 import os
 import re
 import subprocess
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import x_extract
 from x_render import render_note, slugify, note_filename
 from x_media import media_filename
+
+_STATUS_URL = re.compile(
+    r"^https?://(?:www\.)?(?:x|twitter)\.com/([A-Za-z0-9_]{1,15})/status/(\d+)")
 
 
 def status_id_from_url(url):
@@ -75,3 +95,73 @@ def download_open_post(page, handle, out_dir, day, download_media=True):
         "author_name": root["author_name"], "date": date,
         "member_ids": [p["status_id"] for p in th["posts"]],
     }
+
+
+def parse_status_url(url):
+    """`(handle, status_id)` for an X/Twitter status URL, or `(None, None)`.
+
+    Only `x.com` / `twitter.com` `/{handle}/status/{id}` URLs are accepted;
+    anything else (a profile, a search, a bare id) returns `(None, None)` so
+    the caller can refuse instead of navigating somewhere meaningless.
+    """
+    m = _STATUS_URL.match((url or "").strip())
+    return (m.group(1), m.group(2)) if m else (None, None)
+
+
+def download_url(page, url, out_dir, day):
+    """Capture the post at `url`, walking back to the thread root first.
+
+    A shared link is frequently NOT the first post of its thread — people copy
+    a middle or final post. `x_extract.find_root` reads the ancestor articles
+    X renders ABOVE the focal one; when they exist, the capture restarts from
+    the root so the note is the whole thread in order rather than its tail.
+    """
+    handle, focal_id = parse_status_url(url)
+    if not handle:
+        return {"error": f"not an X status URL: {url!r}"}
+
+    page.goto(url)
+    page.wait_for_selector("article", timeout=15000)
+    page.wait_for_timeout(1200)
+
+    root_id = x_extract.find_root(page, focal_id, handle)
+    if root_id != focal_id:
+        print(f"mid-thread link: root is {root_id}", file=sys.stderr)
+        page.goto(f"https://x.com/{handle}/status/{root_id}")
+        page.wait_for_selector("article", timeout=15000)
+        page.wait_for_timeout(1200)
+
+    return download_open_post(page, handle, out_dir, day)
+
+
+def main(argv):
+    if not argv:
+        print("usage: xpost_download.py <x-status-url> [out_dir]", file=sys.stderr)
+        return 2
+
+    url = argv[0]
+    out_dir = os.path.abspath(argv[1]) if len(argv) > 1 else os.getcwd()
+    day = datetime.date.today().isoformat()
+
+    from _browse import sync_browse_page   # imported here so --help needs no browser
+
+    with sync_browse_page() as page:
+        result = download_url(page, url, out_dir, day)
+
+    # No OUTPUT_FILE marker on failure. Emitting one anyway would send the
+    # caller off to summarise a note that was never written, or an empty one.
+    if result.get("error"):
+        print(f"ERROR: {result['error']}", file=sys.stderr)
+        return 1
+
+    handle, _ = parse_status_url(url)
+    note_path = os.path.join(out_dir, handle, result["note"])
+    kind = "thread" if result["is_thread"] else "post"
+    print(f"captured {kind}: {result['post_count']} post(s), "
+          f"{result['media']} image(s) -> {note_path}", file=sys.stderr)
+    print(f"OUTPUT_FILE:{note_path}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

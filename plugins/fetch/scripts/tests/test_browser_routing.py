@@ -32,6 +32,20 @@ ROUTED = [
     # members-only video then renders a watch page with no "Show transcript"
     # button, which is indistinguishable from a video that has no captions.
     "youtube_downloader.py",
+    # Added with the x-post SKILL.md delegation. The download unit gained a CLI
+    # so the skill could stop carrying its own copy of the extraction JS; that
+    # CLI must open the user's logged-in session, not a fresh one. X is the
+    # worst case for getting this wrong — a logged-out X returns a login wall
+    # that renders as a short post, so an empty thread capture reads as a real
+    # single-post capture.
+    "xpost_download.py",
+]
+
+# Scripts that RECEIVE a page rather than opening one. They must never acquire a
+# browser of their own, and their page JS must stay synchronous — `$B js`
+# returns before a promise resolves, so an in-page await is lost with no error.
+PAGE_CONSUMERS = [
+    "x_extract.py",
 ]
 
 
@@ -155,3 +169,27 @@ def test_scripts_that_do_no_browser_work_stay_that_way():
                 f"browser work; any new browser path must go through "
                 f"_browse.browse_page()."
             )
+
+
+@pytest.mark.parametrize("name", PAGE_CONSUMERS)
+def test_page_consumers_launch_no_browser_of_their_own(name):
+    """These modules are handed a page. Opening one would bypass the headed check."""
+    src = _src(name)
+    for banned in ("async_playwright", "chromium.launch", "playwright.async_api",
+                   "playwright.sync_api", "headless=", "BrowsePage(", "disconnect"):
+        assert banned not in src, (
+            f"{name} contains {banned!r}; it is a page CONSUMER and must take "
+            f"whatever page its caller opened through _browse.browse_page()"
+        )
+
+
+@pytest.mark.parametrize("name", PAGE_CONSUMERS)
+def test_page_consumer_javascript_is_synchronous(name):
+    for lineno, js in _evaluate_js_literals(name):
+        assert not js.strip().startswith("async"), (
+            f"{name}:{lineno} passes an async function to evaluate(); the "
+            f"result is silently lost"
+        )
+        assert "await " not in js, (
+            f"{name}:{lineno} passes JS containing `await` to evaluate()"
+        )

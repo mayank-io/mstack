@@ -1,18 +1,17 @@
 ---
 name: x-post
-description: "Extract content from an X/Twitter post, thread, or article using the gstack browser. Detects threads automatically, walks back to the first post when the shared link lands mid-thread, and downloads images locally. Use when the user says \"read this x post\", \"get content from this tweet\", \"what does this x post say\", \"extract this tweet\", \"get the whole thread\", or shares an x.com/twitter.com URL."
+description: "Extract content from an X/Twitter post, thread, or article using the gstack browser. Runs the tested download unit, which detects threads, walks back to the first post when the shared link lands mid-thread, downloads images at original resolution, and writes a Markdown note. Use when the user says \"read this x post\", \"get content from this tweet\", \"what does this x post say\", \"extract this tweet\", \"get the whole thread\", or shares an x.com/twitter.com URL."
 ---
 
 # Download X Post
 
-Use the gstack browser to navigate to an X/Twitter post, extract full content (tweets, threads, and X Articles), detect threads automatically, and download images locally.
+Capture an X/Twitter post or thread — text, metrics, images — through the user's logged-in **gstack browser**, and write it to a Markdown note.
 
+**This skill owns no extraction code.** The DOM logic is [`references/extraction.js`](references/extraction.js); the orchestration is `${CLAUDE_PLUGIN_ROOT}/scripts/`. Both are tested, and both are shared with the x-account bulk harvester. Do not re-implement either here — a second copy drifts from the tested one, and the drift surfaces as a capture that looks fine and is missing half the thread.
 
 ## Browser — always gstack, never headless
 
-Browser work goes through the **gstack browser**, which holds the user's logged-in
-sessions. A fresh Playwright instance is logged out: it silently returns login walls
-or truncated content that looks like a successful capture.
+Browser work goes through the **gstack browser**, which holds the user's logged-in sessions. A fresh Playwright instance is logged out: it silently returns login walls or truncated content that looks like a successful capture.
 
 ```bash
 B="$HOME/.claude/skills/gstack/browse/dist/browse"
@@ -22,12 +21,7 @@ B="$HOME/.claude/skills/gstack/browse/dist/browse"
 "$B" js '<expression>'
 ```
 
-**The daemon must be in `headed` mode.** `browse status` reports either `headed`
-(attached to the user's real Chrome, carrying their logins) or `launched` (gstack's
-own Chromium on a fresh profile, logged into nothing). A `launched` daemon returns
-a login wall for every gated page, and a login wall reads as a *short page* rather
-than an error — nothing downstream will flag it. Verify the mode, and force a
-restart when it is wrong:
+**The daemon must be in `headed` mode.** `browse status` reports either `headed` (attached to the user's real Chrome, carrying their logins) or `launched` (gstack's own Chromium on a fresh profile, logged into nothing). A `launched` daemon returns a login wall for every gated page, and a login wall reads as a *short page* rather than an error — nothing downstream will flag it. Verify the mode, and force a restart when it is wrong:
 
 ```bash
 "$B" status                     # must report `mode: headed`
@@ -35,245 +29,58 @@ restart when it is wrong:
                                 # fresh profile with no logins, so nothing is lost
 ```
 
-The `_browse.py` adapter runs this check inside `connect()` and refuses to continue
-if it cannot reach `headed`. Do the same by hand when driving `$B` directly.
+The `_browse.py` adapter runs this check inside `connect()` and refuses to continue if it cannot reach `headed`. Both entry points below go through it, so the check is automatic; do the same by hand when driving `$B` directly.
 
-**Do NOT `disconnect` when done.** `browse disconnect` tears down the daemon and
-the logged-in sessions with it. Leave it running — the daemon is a shared user
-resource, `connect` is safe to call again, and only whoever started it should
-close it. The
-adapter's `close()` is deliberately a no-op, so leaving the `async with
-browse_page()` block tears down nothing.
+**Do NOT `disconnect` when done.** `browse disconnect` tears down the daemon and the logged-in sessions with it. Leave it running — the daemon is a shared user resource, `connect` is safe to call again, and only whoever started it should close it. The adapter's `close()` is deliberately a no-op, so leaving the `browse_page()` block tears down nothing.
 
-**Never launch a headless browser.** Not `headless=True`, not `--headless`, not a
-fresh `chromium.launch()`. If gstack is unavailable, stop and say so rather than
-falling back — a logged-out capture is worse than no capture, because it looks fine.
+**Never launch a headless browser.** Not `headless=True`, not `--headless`, not a fresh `chromium.launch()`. If gstack is unavailable, stop and say so rather than falling back — a logged-out capture is worse than no capture, because it looks fine.
 
-**Page JavaScript must be synchronous, and values are passed as arguments.** `$B js`
-returns before a promise resolves, so `evaluate()` refuses any expression that is an
-`async` function or contains `await` — the result would be silently lost. Drive the
-waiting and looping from Python with `await page.wait_for_timeout(ms)` between
-synchronous `evaluate()` calls. Pass values with `await page.evaluate(js, arg)`
-rather than string-interpolating them into the JavaScript: an interpolated value
-containing a quote breaks the expression.
+**Page JavaScript must be synchronous, and values are passed as arguments.** `$B js` returns before a promise resolves, so `evaluate()` refuses any expression that is an `async` function or contains `await` — the result would be silently lost. Drive the waiting and looping from Python with `wait_for_timeout(ms)` between synchronous `evaluate()` calls. Pass values with `page.evaluate(js, arg)` rather than string-interpolating them into the JavaScript: an interpolated value containing a quote breaks the expression.
 
 ## Input
 
 The user provided: `$ARGUMENTS`
 
-Parse input:
-- **First argument**: X/Twitter URL (required)
-- **Second argument**: Download directory for images (optional, defaults to current working directory)
+- **First argument**: X/Twitter URL, of the form `https://x.com/{handle}/status/{id}` or `https://twitter.com/{handle}/status/{id}` (required).
+- **Second argument**: output directory (optional, defaults to the current working directory).
 
-## Process
+Anything that is not a status URL — a profile, a search, a bare id — is refused by the script before the browser moves, because a profile page would extract whatever tweet happens to be pinned at the top and that reads as a successful capture of the wrong post.
 
-### Step 1: Validate URL
+## Step 1 — Capture the post or thread
 
-Ensure the URL matches:
-- `https://x.com/{username}/status/{id}`
-- `https://twitter.com/{username}/status/{id}`
+One command does the whole capture:
 
-Extract the `{username}` and `{id}` (status ID) from the URL.
-
-### Step 2: Extract Focal Post
-
-Drive the **gstack browser** through the `_browse.py` adapter — never `mcp__playwright__*`. The adapter exposes a Playwright-shaped API (`goto`, `wait_for_selector`, `evaluate`) over `$B`, so the page-context JavaScript below is unchanged from the Playwright version; only the driver differs.
-
-```python
-import asyncio, json, sys   # asyncio only for asyncio.run()
-sys.path.insert(0, "${CLAUDE_PLUGIN_ROOT}/scripts")
-from _browse import browse_page
-
-JS = r'''<the extraction function below>'''
-
-async def main():
-    async with browse_page() as page:          # headed, carries the user's session
-        await page.goto("THE_URL_HERE")
-        await page.wait_for_selector("article", timeout=15000)
-        for _ in range(15):                    # poll up to 7.5s for media to load
-            if await page.evaluate(IMAGES_READY_JS):
-                break
-            await page.wait_for_timeout(500)
-        print(json.dumps(await page.evaluate(JS)))
-
-asyncio.run(main())
+```bash
+python3 ${CLAUDE_PLUGIN_ROOT}/scripts/xpost_download.py "<url>" [out_dir]
 ```
 
-⚠️ **`$B js` prints its result rather than returning it**, so the adapter wraps every expression in `JSON.stringify` before evaluating. An expression that already stringifies itself would be double-encoded — return a plain object and let the adapter serialise.
+**IMPORTANT:** run this via the Bash tool with `timeout: 300000` (5 minutes). A long thread scrolls up to 14 ticks with a dwell between each, plus a second page load when the link turns out to be mid-thread.
 
-`IMAGES_READY_JS` — poll until media images have a real `src`:
+What it does, in order:
 
-```javascript
-() => {
-  const article = document.querySelector('article');
-  if (!article) return true;
-  const imgs = article.querySelectorAll('img[alt="Image"]');
-  if (imgs.length === 0) return true;
-  return Array.from(imgs).every(img => img.src && img.src.includes('pbs.twimg.com/media'));
-}
-```
+1. Opens the **gstack browser** in headed mode via `_browse.sync_browse_page()` — never a headless or freshly launched one.
+2. Navigates to the URL and waits for `article`.
+3. Injects `references/extraction.js` and calls `findRoot()`. If the shared link is mid-thread, it re-navigates to the root and restarts from there.
+4. Scrolls the conversation, unioning same-author posts on **every** tick, and clusters them into the genuine thread.
+5. Downloads up to 4 images per post with `curl`, at original resolution.
+6. Renders one Markdown note (YAML frontmatter, thread posts as inline `n/N` markers) and prints the path.
 
-The extraction function itself:
+What it writes, under `<out_dir>`:
 
-```javascript
-() => {
-    const article = document.querySelector('article');
-    if (!article) return { error: 'No article found' };
+| Path | Contents |
+|---|---|
+| `<handle>/posts/<date> @<handle> - <slug>.md` | the note — frontmatter (`source`, `author`, `date`, `status_id`, `post_type`, `thread_length`, `likes`, `reposts`, `views`, `media`) plus body |
+| `<handle>/attachments/<handle>-<statusId>-<N>.jpg` | the images, referenced from the note as `![...](attachments/...)` |
 
-    // Author
-    const userLinks = article.querySelectorAll('a[role="link"]');
-    let handle = '', displayName = '';
-    for (const link of userLinks) {
-      const href = link.getAttribute('href');
-      if (href && href.match(/^\/[^\/]+$/) && !href.includes('/status/')) {
-        handle = href.slice(1);
-        displayName = link.textContent?.split('@')[0]?.trim() || handle;
-        break;
-      }
-    }
+**Output contract:** the **final stdout line** is `OUTPUT_FILE:<absolute path to the note>`. Progress goes to stderr. On failure the script exits non-zero and emits **no** `OUTPUT_FILE:` marker — a marker on a failed capture would send the caller off to summarise a note that was never written. Chain on that last line; do not guess the filename from the slug.
 
-    // Content
-    const tweetText = article.querySelector('[data-testid="tweetText"]');
-    let content = tweetText?.innerText || '';
+## Step 2 — X Articles (long-form)
 
-    // Timestamp
-    const timeEl = article.querySelector('time');
-    const timestamp = timeEl?.getAttribute('datetime') || '';
-    const displayTime = timeEl?.textContent || '';
+**The script does not cover X Articles, and it fails loudly rather than quietly.** A regular tweet has `[data-testid="tweetText"]`; an X Article does not, so extraction returns empty text for a 40,000-character essay and the script exits with `no content`. **Emptiness is the detection signal, not a result.**
 
-    // Engagement metrics
-    const engagementGroup = article.querySelector('[role="group"][aria-label]');
-    const ariaLabel = engagementGroup?.getAttribute('aria-label') || '';
-    const metrics = { likes: 0, reposts: 0, replies: 0, views: 0 };
-    const likesMatch = ariaLabel.match(/(\d[\d,]*)\s*likes?/i);
-    const repostsMatch = ariaLabel.match(/(\d[\d,]*)\s*reposts?/i);
-    const repliesMatch = ariaLabel.match(/(\d[\d,]*)\s*repl(?:y|ies)/i);
-    const viewsMatch = ariaLabel.match(/(\d[\d,]*)\s*views?/i);
-    if (likesMatch) metrics.likes = parseInt(likesMatch[1].replace(/,/g, ''));
-    if (repostsMatch) metrics.reposts = parseInt(repostsMatch[1].replace(/,/g, ''));
-    if (repliesMatch) metrics.replies = parseInt(repliesMatch[1].replace(/,/g, ''));
-    if (viewsMatch) metrics.views = parseInt(viewsMatch[1].replace(/,/g, ''));
+When that happens, capture the article by hand with `extractLongform()` from the same `references/extraction.js` — see [Driving extraction.js directly](#driving-extractionjs-directly) for the harness. It returns `{body, headings, links, images}`.
 
-    // Image count validation
-    const photoLinks = article.querySelectorAll('a[href*="/photo/"]');
-    const expectedImageCount = photoLinks.length;
-
-    // Images — always request the ORIGINAL resolution, not 'large'.
-    // X serves &name=small/medium/large as downscales; only 'orig' is the
-    // full-resolution file, and a downscaled chart or screenshot is often
-    // unreadable at the point it matters.
-    const images = Array.from(article.querySelectorAll('img'))
-      .filter(img => img.src && img.src.includes('pbs.twimg.com/media'))
-      .map(img => img.src.replace(/name=\w+/, 'name=orig'));
-
-    return { handle, displayName, content, timestamp, displayTime, metrics, images, expectedImageCount };
-}
-```
-
-**Replace `THE_URL_HERE` with the actual URL.**
-
-**Image validation:** If `expectedImageCount > 0` but `images.length === 0`, images failed to load. Re-run the extraction once more.
-
-### Step 2.5: Find the Thread Root (Walk Backward to the First Post)
-
-**A shared link is frequently NOT the first post in its thread** — users often copy a middle or final post. Before treating the focal post as the start, check whether earlier posts by the same author exist ABOVE it. If they do, the real thread begins higher up and everything downstream must start from that root.
-
-When a post is a self-reply inside a thread, X renders its ancestor posts ABOVE the focal `<article>` in the conversation (DOM order: ancestors → focal → replies). Detect them:
-
-```javascript
-// Python driver (the JS below is the page-context evaluate):
-//   await page.goto("FOCAL_URL_HERE")
-//   await page.wait_for_selector("article", timeout=15000)
-//   await page.wait_for_timeout(1500)
-//   roots = await page.evaluate(JS, {"focalId": "...", "handle": "..."})
-// Arguments ARE passed through — but only because the adapter applies them.
-// Until 2026-08-24 they were silently dropped, and focalId arriving as
-// undefined made this walk report "not a thread" for every real thread.
-({ focalId, handle }) => {
-    const articles = Array.from(document.querySelectorAll('article'));
-
-    const handleOf = (a) => {
-      for (const link of a.querySelectorAll('a[role="link"]')) {
-        const href = link.getAttribute('href');
-        if (href && href.match(/^\/[^\/]+$/) && !href.includes('/status/')) return href.slice(1);
-      }
-      return '';
-    };
-    // Prefer the timestamp permalink — that anchor points to the article's OWN status id
-    const statusIdOf = (a) => {
-      const timeAnchor = a.querySelector('time')?.closest('a[href*="/status/"]');
-      const m = (timeAnchor?.getAttribute('href') || '').match(/\/status\/(\d+)/);
-      if (m) return m[1];
-      for (const link of a.querySelectorAll('a[href*="/status/"]')) {
-        const mm = link.getAttribute('href').match(/\/status\/(\d+)/);
-        if (mm) return mm[1];
-      }
-      return '';
-    };
-
-    // Locate the focal article, then collect same-author posts ABOVE it
-    let focalIdx = articles.findIndex(a => statusIdOf(a) === focalId);
-    if (focalIdx === -1) focalIdx = 0;
-
-    const ancestors = [];
-    for (let i = 0; i < focalIdx; i++) {
-      if (handleOf(articles[i]).toLowerCase() === handle.toLowerCase()) {
-        const sid = statusIdOf(articles[i]);
-        if (sid && sid !== focalId) ancestors.push(sid);
-      }
-    }
-
-    // Root = earliest (lowest) Snowflake ID among ancestors + focal
-    const cluster = [...new Set([...ancestors, focalId])]
-      .sort((a, b) => a.length - b.length || (a < b ? -1 : a > b ? 1 : 0));
-
-    return { hasEarlier: ancestors.length > 0, rootId: cluster[0], ancestors };
-}
-```
-
-**Replace** `FOCAL_URL_HERE` in the driver, and pass `focalId` / `handle` as the `evaluate` argument object rather than interpolating them into the JavaScript — an interpolated handle containing a quote would break the expression.
-
-**Interpreting results:**
-
-- **`hasEarlier: false`** — the link IS the first post (or a standalone post). Continue normally.
-- **`hasEarlier: true`** — the link is mid-thread. Set the **root post** = `rootId`, navigate to `https://x.com/{handle}/status/{rootId}`, re-run Step 2 extraction on it, and treat `rootId` as the first post for every downstream step.
-
-**Robustness — ancestors can lazy-load.** If `hasEarlier` is `false` but the focal post looks like a continuation (starts mid-sentence or with a connector like "And"/"But", opens with a list marker, or the article shows a "Show this thread" affordance), scroll UP a few times and re-check before concluding it is the first post:
-
-```python
-# Python — the wait cannot live in page JS; $B js returns before a promise
-# resolves, so an in-page `await sleep()` loses the result silently.
-for _ in range(5):
-    await page.evaluate("() => window.scrollBy(0, -window.innerHeight)")
-    await page.wait_for_timeout(800)
-```
-
-### Step 3: Detect X Article (Long-Form)
-
-**`tweetText` empty or under ~50 characters means an X Article, not a short post.** Step 2 returns `text: ""` for a 44,000-character essay, so treat emptiness as a signal rather than a result.
-
-Extract from the DOM, not from `"$B" snapshot`. Measured on a real article (`saylor/2091923153542840808`, 43,261 characters):
-
-```javascript
-() => {
-  const root = document.querySelector('[data-testid=twitterArticleRichTextView]');
-  if (!root) return {err: 'not an article'};
-  const body = root.querySelector('[data-testid=longformRichTextComponent]');
-  return {
-    body: body ? body.innerText : '',
-    headings: Array.from(root.querySelectorAll('h1,h2,h3'))
-      .map(h => ({level: h.tagName.toLowerCase(), text: h.innerText.trim()}))
-      .filter(h => h.text),
-    links: Array.from(root.querySelectorAll('a[href^="http"]'))
-      .map(a => ({text: (a.innerText || '').trim(), href: a.href})),
-    images: Array.from(root.querySelectorAll('img'))
-      .map(i => i.src).filter(s => s && s.includes('pbs.twimg.com/media'))
-      .map(s => s.replace(/name=\w+/, 'name=orig'))
-  };
-}
-```
-
-**The body arrives as ONE block, and the headings are inside it.** This is the part that produces a mangled note if you assume otherwise:
+**The body arrives as ONE block, and the headings are inside it.** This is the part that produces a mangled note if you assume otherwise. Measured on a real article (`saylor/2091923153542840808`, 43,261 characters):
 
 | Assumption | Reality on a live article |
 |---|---|
@@ -302,210 +109,135 @@ sections = [
 
 **Verify the split reassembles.** `len(intro) + sum(len(heading) + len(text))` should equal the body length to within trimmed whitespace. A heading that appears twice in the body, or a `find` that misses, silently drops a whole section otherwise — and the note still looks complete.
 
-**Why not `"$B" snapshot`:** it returned **53,899 bytes** for this one article, and the accessibility tree flattens the heading/body relationship that the split above depends on. The DOM carries the same content with the structure intact.
+**Why not `"$B" snapshot`:** it returned **53,899 bytes** for this one article, and the accessibility tree flattens the heading/body relationship the split above depends on. The DOM carries the same content with the structure intact.
 
 Preserve in the output: section headings with their level, the intro before the first heading, embedded links (a well-sourced article can carry 59 of them — worth keeping as a reference list), and image positions.
 
-### Step 4: Thread Detection
+## Step 3 — Present the result
 
-**IMPORTANT: Always check for threads — and always start from the FIRST post (the root from Step 2.5), not the originally-shared link.**
+Read the note the script wrote (`OUTPUT_FILE:`) and summarise it for the user: author, date, engagement, whether it was a single post or an *n*-post thread, and how many images landed in `attachments/`. Quote the content rather than paraphrasing it when the user asked what the post *says*.
 
-On the first post's page, scroll down to load thread posts, then find all articles by the same author. Capture a content snippet and a "replying to another user" flag for each, so the candidates can be filtered down to the genuine thread:
-
-```javascript
-// HARVEST_JS — run this INSIDE the scroll loop, once per iteration.
-//
-// X's timeline is VIRTUALISED: articles unmount as they leave the viewport, so
-// a single pass after scrolling sees only what is on screen at the end and
-// loses everything scrolled past. This accumulates into a page-context
-// variable keyed by status id, which survives across evaluate() calls because
-// it lives on `window`.
-(handle) => {
-    window.__xacc = window.__xacc || {};
-    const articles = document.querySelectorAll('article');
-
-    for (const article of articles) {
-      // Check author
-      const userLinks = article.querySelectorAll('a[role="link"]');
-      let articleHandle = '';
-      for (const link of userLinks) {
-        const href = link.getAttribute('href');
-        if (href && href.match(/^\/[^\/]+$/) && !href.includes('/status/')) {
-          articleHandle = href.slice(1);
-          break;
-        }
-      }
-
-      if (articleHandle.toLowerCase() !== handle.toLowerCase()) continue;
-
-      // Get status ID from article links
-      const allLinks = Array.from(article.querySelectorAll('a[href]'));
-      let statusId = '';
-      for (const link of allLinks) {
-        const match = link.href.match(/\/status\/(\d+)$/);
-        if (match) { statusId = match[1]; break; }
-      }
-
-      // Signals for thread-membership filtering (see Interpreting results)
-      const tweetText = article.querySelector('[data-testid="tweetText"]');
-      const snippet = (tweetText?.innerText || '').slice(0, 80);
-      const isReplyToOther = /(^|\n)Replying to/.test(article.innerText || '');
-
-      if (statusId) window.__xacc[statusId] = { statusId, snippet, isReplyToOther };
-    }
-
-    return Object.keys(window.__xacc).length;   // progress signal for the loop
-}
-```
-
-Then read the accumulator out **once, after the loop finishes**:
-
-```javascript
-// READOUT_JS
-() => {
-  const posts = Object.values(window.__xacc || {});
-  // Sort by status ID ascending — Snowflake IDs are chronological.
-  posts.sort((a, b) =>
-    a.statusId.length !== b.statusId.length
-      ? a.statusId.length - b.statusId.length
-      : (a.statusId < b.statusId ? -1 : a.statusId > b.statusId ? 1 : 0));
-  return posts;
-}
-```
-
-Driven from Python — note the harvest happens **every iteration**, and the loop
-stops when the accumulator stops growing rather than when the visible count does:
-
-```python
-await page.evaluate("() => { window.__xacc = {}; }")   # reset per run
-previous = 0
-for i in range(10):
-    await page.evaluate("() => window.scrollBy(0, window.innerHeight)")
-    await page.wait_for_timeout(1000)
-    total = await page.evaluate(HARVEST_JS, handle)     # accumulate, don't replace
-    if total == previous and i > 1:
-        break
-    previous = total
-posts = await page.evaluate(READOUT_JS)
-```
-
-Pass the author handle as the `evaluate` argument (`await page.evaluate(JS, handle)`), not by string-interpolating it into the JavaScript.
-
-**Interpreting results:**
-
-- **1 post found**: Not a thread. Continue with the first post's data.
-- **Multiple posts found**: These are *candidates*, not all thread members. A thread is posted in one sitting, so genuine members form a tight cluster of near-sequential Snowflake IDs with near-identical timestamps. The author's later replies to commenters get swept up here too — **filter them out first**:
-  - **Keep** the contiguous self-reply chain that starts at the root: posts whose IDs increment by small amounts with no large gap from the previous kept post (the cluster typically spans seconds to a few minutes).
-  - **Drop** any post flagged `isReplyToOther: true`, and any post sitting after a large ID/timestamp gap from the previous thread member — those are the author replying to other users, NOT part of the thread. (This is the most common false positive: e.g. a 7-post thread where IDs jump from `…594659836065` to `…681933271330968` — everything from the jump onward is replies-to-commenters.)
-  - Sanity-check with the `snippet`s: real thread posts continue one narrative; dropped ones are short one-liners aimed at someone else ("Thank you!", "Congrats!", or starting with `@handle`).
-
-  For each KEPT post OTHER than the root:
-  1. Navigate to `https://x.com/{handle}/status/{statusId}`
-  2. Run the Step 2 extraction code to get full content and images
-  3. If content is empty/short, apply Step 3 (X Article detection) for that post
-  4. Collect all posts in the chronological order returned by the script
-
-After extracting all kept posts, assemble the complete thread data as an array sorted chronologically (root first).
-
-### Step 5: Download Images
-
-Collect all image URLs from all extracted posts (focal + thread). Download each using curl:
-
-```bash
-curl -L "<image_url>" -o "<output_dir>/<handle>-<statusId>-<N>.jpg"
-```
-
-Where:
-- `<output_dir>`: User-specified directory or current working directory
-- `<handle>`: Author's handle (lowercase)
-- `<statusId>`: The post's status ID
-- `<N>`: Image index within that post (1, 2, 3...)
-
-Run downloads in parallel when possible (multiple curl commands in one bash call separated by `&` and a final `wait`).
-
-Report the count and paths of downloaded images.
-
-### Step 6: Present Structured Content
-
-**Single Post:**
+If the user wanted the content in conversation rather than on disk, present it as:
 
 ```
-## @{handle} — {title or first line}
+## @{handle} — {title or first line}{ (Thread: n posts) if a thread}
 
-**Date:** {displayTime}
-**Engagement:** {likes} likes, {reposts} reposts, {replies} replies, {views} views
+**Date:** {date}
+**Engagement:** {likes} likes, {reposts} reposts, {views} views
 **URL:** {original url}
 
 ---
 
-{Full post content}
+{post content — for a thread, each post prefixed **i/n**}
 
 ---
 
-**Images:** {count} images downloaded
+**Images:** {count} downloaded
 {list each filename}
 ```
 
-**Thread:**
+## Where each failure mode is handled
 
+Every one of these was a real, silently-wrong capture. They now live in code, not in prose here — this table says **where**, so a regression is fixed in the one place every consumer shares.
+
+| Failure mode | Handled in | Why it is not obvious |
+|---|---|---|
+| **Thread virtualization** — articles unmount as they scroll out of the viewport, so a single pass after scrolling sees only the last screenful | `x_extract.collect_thread_posts` — unions same-author posts on **every** tick and stops when the union stops growing, not when the visible count stops changing | The capture succeeds and returns the tail of the thread |
+| **Mid-thread links** — a shared link is frequently NOT the first post; people copy a middle or final post | `extraction.js findRoot()` reads the ancestor articles X renders ABOVE the focal one; `xpost_download.download_url` re-navigates to the root before capturing | Extracting from the focal post yields a coherent-looking note that starts at post 7/7 |
+| **Same author ≠ same thread** — the author's replies to commenters render under the same handle | `x_threads.cluster` + `x_snowflake.same_thread` (30-minute Snowflake gap), plus `isReplyToOther` from `extraction.js` | The false positives are real posts by the right author; only the timestamp gap distinguishes them |
+| **Image resolution** — `&name=small/medium/large` are downscales | `extraction.js` rewrites every `pbs.twimg.com/media` src to `name=orig` | A downscaled chart or screenshot is unreadable at exactly the point it matters, and nothing errors |
+| **Images not yet loaded** — X mounts `<img alt="Image">` before the src is set | `extraction.js imagesReady()`, polled from the driver; `expectedImageCount` (from `a[href*="/photo/"]`) cross-checks the result | A four-image post extracts zero images and looks like a text-only post |
+| **X Articles** — no `tweetText` element at all | `extraction.js extractLongform()`, driven per [Step 2](#step-2--x-articles-long-form) | Extraction returns `""` for a 40k-character essay |
+| **Arguments dropped into page JS** — until 2026-08-24 the adapter discarded `evaluate()` args | `_browse.evaluate()` applies them, and refuses an arrow that is not a parenthesised function literal | `focalId` arriving as `undefined` made the root walk report "not a thread" for every real thread |
+| **A logged-out browser** | `_browse.connect()` refuses anything but `headed` mode | A login wall renders as a short page, not an error |
+
+## Driving extraction.js directly
+
+For debugging, for X Articles, or when you need a single value rather than a whole note. This is the **same** extractor the script runs — never paste its function bodies into this file or into a one-off snippet.
+
+```python
+import asyncio, json, pathlib, sys
+sys.path.insert(0, "${CLAUDE_PLUGIN_ROOT}/scripts")
+from _browse import browse_page
+
+SRC = pathlib.Path("${CLAUDE_PLUGIN_ROOT}/skills/x-post/references/extraction.js").read_text()
+# The file is a bare IIFE statement. The adapter wraps whatever it is given in
+# JSON.stringify((...)), and a statement in that position is a syntax error —
+# the injection would fail and leave the page with no extractor at all. Handing
+# it a function literal makes the file a block body, which is legal in both drivers.
+INJECT = "() => {\n" + SRC + "\nreturn typeof window.__xExtract;\n}"
+
+async def main():
+    async with browse_page() as page:                  # headed, carries the user's session
+        await page.goto("THE_URL_HERE")
+        await page.wait_for_selector("article", timeout=15000)
+        assert await page.evaluate(INJECT) == "object"  # injection took
+
+        for _ in range(15):                             # poll up to 7.5s for media
+            if await page.evaluate("() => window.__xExtract.imagesReady()"):
+                break
+            await page.wait_for_timeout(500)
+
+        focal = await page.evaluate("() => window.__xExtract.extractFocal()")
+        print(json.dumps(focal, indent=2))
+
+asyncio.run(main())
 ```
-## @{handle} — {title or first line} (Thread: {n} posts)
 
-**Date:** {displayTime}
-**Engagement:** {likes} likes, {reposts} reposts, {replies} replies, {views} views
-**URL:** {original url}
+Replace `THE_URL_HERE` with the actual URL. The exported functions:
 
----
+| Call | Returns |
+|---|---|
+| `window.__xExtract.extractFocal()` | the first `<article>` on the page: `{statusId, handle, displayName, content, timestamp, metrics, expectedImageCount, images}` |
+| `window.__xExtract.extractArticle(node)` | the same shape for a specific `<article>` element |
+| `window.__xExtract.extractAllByAuthor(h)` | every same-author article currently in the DOM, full content, plus `isReplyToOther`, sorted by Snowflake id |
+| `window.__xExtract.findRoot(f, h)` | `{hasEarlier, rootId, ancestors}` for focal id `f` and handle `h` |
+| `window.__xExtract.detectThreadMembers(h)` | same-author candidates as `{statusId, snippet, isReplyToOther}` — filtering to the genuine chain is the caller's job |
+| `window.__xExtract.extractLongform()` | X Article: `{body, headings, links, images}`, or `{error: 'not an article'}` |
+| `window.__xExtract.imagesReady()` | `true` once every `img[alt="Image"]` has a real `pbs.twimg.com` src |
 
-### Post 1/{n}
+Two rules when calling these:
 
-{content of first post}
+- **Parenthesise arrow parameters.** `(h) => window.__xExtract.extractAllByAuthor(h)` — the adapter only applies arguments to a recognised function literal, and `h => …` is rejected rather than silently losing the handle. An author filter matching nobody returns zero posts, not an error.
+- **Pass values as arguments, never by interpolation.** `await page.evaluate(js, handle)`, not an f-string — a handle containing a quote breaks the expression.
 
-**Images:** {list of downloaded filenames for this post}
+**Robustness — ancestors can lazy-load.** If `findRoot` reports `hasEarlier: false` but the post looks like a continuation (starts mid-sentence or with "And"/"But", opens with a list marker, or shows a "Show this thread" affordance), scroll UP a few times and re-check:
 
----
-
-### Post 2/{n}
-
-{content of second post}
-
-**Images:** {list of downloaded filenames for this post}
-
----
-
-[... continue for all posts ...]
+```python
+for _ in range(5):
+    await page.evaluate("() => window.scrollBy(0, -window.innerHeight)")
+    await page.wait_for_timeout(800)
 ```
 
-**X Article:**
+The wait cannot live in page JS — `$B js` returns before a promise resolves, so an in-page `await sleep()` loses the result silently.
 
-Same as single post format but with section headings preserved and `[Image: context]` markers replaced with downloaded filenames.
+## Using the download unit from Python
+
+`xpost_download` is a library as well as a CLI. Given a page already sitting on a post, capture it without re-navigating:
+
+```python
+xpost_download.download_open_post(page, handle, out_dir, day, download_media=True)
+```
+
+It returns `{note, fname, status_id, root_id, is_thread, post_count, media, author_name, date, member_ids}`, or `{"error": ...}`. `page` must be a **sync**-shaped page — `_browse.sync_browse_page()` gives you one over gstack. This is the seam the x-account bulk harvester uses: `scripts/xaccount_iterate.py <handle> <out_dir> <max_posts>` scrolls a profile, Cmd+Clicks each post into a new tab, and hands the tab to `download_open_post`. Note that the iterator currently drives its **own** Playwright profile at `~/.claude/x-playwright-profile` rather than gstack, so it is not covered by the headed-mode guarantee above; prefer this skill's CLI for single posts.
 
 ## Tips
 
-- X blocks direct HTTP fetching — a real browser is required, and it must be the gstack one (the user's logged-in session). A logged-out browser returns a login wall that looks like an empty post rather than an error.
-- Regular tweets have `[data-testid="tweetText"]`; X Articles do not
-- Thread posts are detected by finding multiple `<article>` elements by the same author
-- The shared link may be mid-thread — Step 2.5 walks back to the first post via the ancestor articles rendered ABOVE the focal tweet
-- Same-author ≠ same-thread: the author's replies to commenters appear by the same handle. Distinguish real thread members by tight ID/timestamp clustering and `isReplyToOther`; large ID gaps mark the end of the thread
-- Thread posts in the page view may be truncated — always navigate to individual URLs for full content
-- Status IDs are Snowflake-based: ascending = chronological order; threads posted together have near-adjacent IDs
-- Images are downloaded at original resolution (`name=orig`, per the Step 2 rewrite — `large` is a downscale)
-- If the page requires login, extraction may be limited
+- X blocks direct HTTP fetching — a real browser is required, and it must be the gstack one. A logged-out browser returns a login wall that looks like an empty post rather than an error.
+- Status IDs are Snowflake-based: ascending order is chronological, and posts written in one sitting have near-adjacent ids. That is what the 30-minute gap in `x_snowflake.same_thread` keys on.
+- Thread posts rendered in the conversation view can be truncated; the extractor reads each article's own `tweetText`, and `extractAllByAuthor` collects them from the conversation page rather than by navigating to every status URL (which looks robotic).
+- Re-running the script overwrites the note for the same post; images already downloaded are re-fetched.
+- If the capture comes back with fewer posts than the thread visibly has, the usual cause is the scroll budget (`collect_thread_posts(..., scrolls=14)`), not the extractor.
 
 ## Examples
 
-### Example 1: Regular Tweet
-Input: `/fetch:x-post https://x.com/elonmusk/status/123456`
-Result: Extracts tweet text, metrics, downloads images; presents in conversation
+```bash
+# Single tweet, note written under the current directory
+/fetch:x-post https://x.com/elonmusk/status/123456
 
-### Example 2: X Article
-Input: `/fetch:x-post https://x.com/0xMovez/status/2004570871294239187`
-Result: Detects empty tweetText, falls back to snapshot, extracts full article with all sections
+# Thread, into a specific directory
+/fetch:x-post https://x.com/bourboncap/status/2020489596505592084 ./captures
+```
 
-### Example 3: Thread
-Input: `/fetch:x-post https://x.com/bourboncap/status/2020489596505592084`
-Result: Extracts focal post, detects 5 more posts by same author, navigates to each, downloads all images, presents complete 6-post thread
-
-### Example 4: Mid-thread link (walk back to the first post)
-Input: `/fetch:x-post https://x.com/ericjackson/status/1997633594659836065`
-Result: Step 2.5 finds 6 earlier same-author posts above the focal → resets the root to `…633559859790018` ("…here's the truth 👇"). Step 4 collects candidates, drops the author's later replies-to-commenters after the ID gap, and presents the genuine 7-post thread in order (the originally-shared link turns out to be post 7/7).
+- **Mid-thread link** — `https://x.com/ericjackson/status/1997633594659836065` is post 7/7. `findRoot` finds 6 earlier same-author posts above the focal one, the script re-navigates to `…633559859790018` ("…here's the truth 👇"), and the note contains the genuine 7-post thread in order. The author's later replies to commenters, which sit after a large Snowflake gap, are excluded.
+- **X Article** — `https://x.com/0xMovez/status/2004570871294239187` exits with `no content` because there is no `tweetText`. Fall back to [Step 2](#step-2--x-articles-long-form).

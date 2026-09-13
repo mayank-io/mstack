@@ -346,3 +346,68 @@ def test_cookies_skips_browse_progress_chatter():
 def test_cookies_returns_empty_list_when_there_are_none():
     assert _browse.BrowsePage.cookies(CookieSpy("[]\n")) == []
     assert _browse.BrowsePage.cookies(CookieSpy("")) == []
+
+
+# ------------------------------------------------------------- sync façade
+
+class SyncSpy(_browse.BrowsePage):
+    """Records every `$B` subcommand instead of running one."""
+
+    def __init__(self, reply="null"):
+        self.calls = []
+        self.reply = reply
+
+    def _run(self, *args, **kwargs):
+        self.calls.append(args)
+        return self.reply
+
+
+def test_sync_evaluate_returns_a_value_not_a_coroutine():
+    """x_extract/xpost_download are written against the sync API: they use the
+    return value directly. A coroutine there is never awaited, and every
+    extraction comes back empty with no error anywhere."""
+    page = _browse.SyncBrowsePage(SyncSpy(reply='"object"'))
+    assert page.evaluate("typeof window.__xExtract") == "object"
+
+
+def test_sync_evaluate_applies_arguments():
+    spy = SyncSpy()
+    _browse.SyncBrowsePage(spy).evaluate("(h) => f(h)", "bourboncap")
+    assert "bourboncap" in spy.calls[-1][1]
+
+
+def test_sync_url_reads_the_live_location():
+    """xpost_download derives the focal status id from `page.url`."""
+    spy = SyncSpy(reply="https://x.com/bob/status/1\n")
+    assert _browse.SyncBrowsePage(spy).url == "https://x.com/bob/status/1"
+    assert spy.calls[-1][0] == "url"
+
+
+def test_sync_goto_and_wait_reach_the_same_browse_binary():
+    spy = SyncSpy()
+    page = _browse.SyncBrowsePage(spy)
+    page.goto("https://x.com/bob/status/1")
+    page.wait_for_selector("article", timeout=15000)
+    assert [c[0] for c in spy.calls] == ["goto", "wait"]
+
+
+def test_sync_wait_for_selector_tolerates_multiple_matches():
+    """An X status page always has several <article> elements; Playwright waits
+    for the first and does not care how many there are."""
+    class Multi(SyncSpy):
+        def _run(self, *args, **kwargs):
+            self.calls.append(args)
+            raise _browse.BrowseError("Selector matched multiple elements")
+
+    _browse.SyncBrowsePage(Multi()).wait_for_selector("article")
+
+
+def test_sync_session_never_tears_down_the_daemon():
+    """The daemon holds the user's logins; it is not this object's to close."""
+    session = _browse.sync_browse_page()
+    session._page = SyncSpy()
+    session._page.connect = lambda **_: None
+    page = session.__enter__()
+    assert isinstance(page, _browse.SyncBrowsePage)
+    session.__exit__(None, None, None)
+    assert not any(c[0] == "disconnect" for c in session._page.calls)
