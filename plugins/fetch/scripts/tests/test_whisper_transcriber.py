@@ -200,3 +200,43 @@ def test_both_backends_agree_on_the_json_schema_the_formatter_reads(tmp_path):
     (tmp_path / "probe.json").write_text(json.dumps(payload))
     assert wt.format_segments(json.loads((tmp_path / "probe.json").read_text())) == (
         "0:01 Hi.", "en")
+
+
+# --- repetition loops -----------------------------------------------------
+
+def test_a_decoder_loop_is_detected():
+    # The real failure this was written for: a 53-minute lecture whose last 11
+    # minutes were "the crash of 1929" repeated. The transcript ran to the full
+    # duration and read as English, so every coverage check passed.
+    looped = "42:34 " + "the crash of 1929, " * 40
+    suspects = wt.detect_repetition_loops(looped)
+    assert len(suspects) == 1
+    assert suspects[0]["timestamp"] == "42:34"
+    assert suspects[0]["repeated_fraction"] > 0.9
+
+
+def test_ordinary_speech_is_not_flagged():
+    prose = ("0:00 And so what I would like to do here rather than make a pitch for growth "
+             "optimality and its attendant way of achieving it, I would like to reverse it.")
+    assert wt.detect_repetition_loops(prose) == []
+
+
+def test_short_lines_are_not_flagged():
+    # "Yes, yes, yes." is speech, not a decoder loop; the window is too small
+    # to distinguish, so it must not produce a false positive.
+    assert wt.detect_repetition_loops("0:05 Yes, yes, yes.") == []
+
+
+def test_conditioning_can_be_disabled_on_both_backends(tmp_path):
+    mlx = wt.build_mlx_argv(tmp_path / "a.mp3", "medium", "auto", tmp_path, False)
+    assert mlx[mlx.index("--condition-on-previous-text") + 1] == "False"
+
+    ref = wt.build_whisper_argv(tmp_path / "a.mp3", "medium", "auto", tmp_path, False)
+    assert ref[ref.index("--condition_on_previous_text") + 1] == "False"
+
+
+def test_conditioning_is_on_by_default(tmp_path):
+    # Conditioning improves accuracy in general; it is an escape hatch, not a
+    # default, so the flag must be absent unless asked for.
+    assert "--condition-on-previous-text" not in wt.build_mlx_argv(
+        tmp_path / "a.mp3", "medium", "auto", tmp_path)

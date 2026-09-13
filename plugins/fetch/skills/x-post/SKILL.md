@@ -69,10 +69,72 @@ What it writes, under `<out_dir>`:
 
 | Path | Contents |
 |---|---|
-| `<handle>/posts/<date> @<handle> - <slug>.md` | the note — frontmatter (`source`, `author`, `date`, `status_id`, `post_type`, `thread_length`, `likes`, `reposts`, `views`, `media`) plus body |
+| `<handle>/posts/<date> @<handle> - <slug>.md` | the note — frontmatter (`source`, `author`, `date`, `status_id`, `post_type`, `thread_length`, `likes`, `reposts`, `views`, `media`, and for a video post `media_type`, `video_duration`, `video_seconds`, `transcript: pending`) plus body |
 | `<handle>/attachments/<handle>-<statusId>-<N>.jpg` | the images, referenced from the note as `![...](attachments/...)` |
 
 **Output contract:** the **final stdout line** is `OUTPUT_FILE:<absolute path to the note>`. Progress goes to stderr. On failure the script exits non-zero and emits **no** `OUTPUT_FILE:` marker — a marker on a failed capture would send the caller off to summarise a note that was never written. Chain on that last line; do not guess the filename from the slug.
+
+## Step 1.5 — Video posts
+
+**A video post captured as its caption alone is not a capture.** The caption is the hook; the video is the content. This is the `notes:clip` Step 2.6 invariant — reproduce the source, then summarise it — applied to X, and it is the rule the earlier video clippings in the vault break by carrying a "not transcribed here" callout where the body should be.
+
+### How you know
+
+`xpost_download.py` detects video and reports it two ways:
+
+| Signal | Where |
+|---|---|
+| `VIDEO_DETECTED:<status_url>\t<seconds>` | **stderr**, one line |
+| `media_type: video`, `video_duration`, `video_seconds`, `transcript: pending` | the note's frontmatter |
+
+`transcript: pending` is the debt marker. A note that still says `pending` is unfinished.
+
+Detection reads the play button's `aria-label` (`"Play Video. 53 minutes 35 seconds long"`) — the only place X renders a duration. A video whose duration could not be read reports `media_type: video` with **no** `video_seconds`; that means *unknown*, not *short*. GIFs are flagged `media_type: gif` and owe no transcript.
+
+### Transcribe it
+
+The extractor cannot do this itself: it runs under a 5-minute Bash timeout and a 53-minute source will not fit. Run transcription as its own step, with `timeout: 1800000` (30 minutes) on the Bash call:
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/whisper_transcriber.py" \
+  "<status_url>" --backend mlx --model large-v3-turbo --language auto
+```
+
+`--backend mlx` runs mlx-whisper through `uvx` (Apple Silicon; nothing to install). yt-dlp reaches X video **without cookies**, so transcription does not depend on the browser session even though the post capture does. The final stdout line is `OUTPUT_FILE:<path to JSON>`; chain on it.
+
+Then run `notes:clean-transcript` on the result. **Never clean a transcript by hand** — that skill's verbatim invariant is enforced by a test, and an intention to stay verbatim is not.
+
+### Check for a decoder loop before you trust it
+
+Whisper conditions on its own output, and on long audio it can catch a phrase and emit it for the rest of the file. **The transcript still runs to the full duration and still reads as English**, so a length check, a coverage check and a spot-read of the opening all pass while the content is gone. The 53-minute lecture this step was written for lost its last 11 minutes to `"the crash of 1929"` repeated ~500 times.
+
+The script flags this on stderr:
+
+```
+WARNING: 23 segment(s) look like a decoder repetition loop, first at 42:34.
+Re-run with --no-condition-on-previous-text.
+```
+
+Do exactly that, and use `--audio <path>` so the source is not downloaded twice. `repetition_warnings` in the output JSON must be empty before the transcript goes into a note.
+
+### Check who actually made the video
+
+X shows the *poster*, not the author. Before attributing a re-upload:
+
+```bash
+yt-dlp -J "<status_url>" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d['id'], d['duration'], d.get('description',''))"
+```
+
+Two tells, both invisible on the rendered page:
+
+- **The yt-dlp `id` differs from the status id in the URL** — the media was uploaded under a different post.
+- **A `t.co` link in the description resolves to another account's status with the same duration.** Resolve with `curl -sIL -o /dev/null -w '%{url_effective}' <t.co url>`; match duration to the centisecond, which is what makes it proof rather than a guess.
+
+When either fires, the poster is an amplifier. Credit the content to the original author and record the re-upload — a clipping that names the wrong author is worse than no clipping.
+
+### Do not substitute a still
+
+A final-frame screenshot is a supplement for a chart video, never a replacement for speech. A note whose "content" is one still has the same problem as a note that is only a caption.
 
 ## Step 2 — X Articles (long-form)
 
@@ -147,6 +209,9 @@ Every one of these was a real, silently-wrong capture. They now live in code, no
 | **Same author ≠ same thread** — the author's replies to commenters render under the same handle | `x_threads.cluster` + `x_snowflake.same_thread` (30-minute Snowflake gap), plus `isReplyToOther` from `extraction.js` | The false positives are real posts by the right author; only the timestamp gap distinguishes them |
 | **Image resolution** — `&name=small/medium/large` are downscales | `extraction.js` rewrites every `pbs.twimg.com/media` src to `name=orig` | A downscaled chart or screenshot is unreadable at exactly the point it matters, and nothing errors |
 | **Images not yet loaded** — X mounts `<img alt="Image">` before the src is set | `extraction.js imagesReady()`, polled from the driver; `expectedImageCount` (from `a[href*="/photo/"]`) cross-checks the result | A four-image post extracts zero images and looks like a text-only post |
+| **Video posts** — the caption is the hook, the video is the content | `extraction.js extractVideo()` sets `media_type`/`video_duration` and `transcript: pending`; [Step 1.5](#step-15--video-posts) transcribes | A 53-minute lecture captures as one sentence and reads as a complete short post |
+| **Decoder repetition loops** — Whisper emits one phrase for the rest of the file | `whisper_transcriber.detect_repetition_loops()` warns on stderr; re-run with `--no-condition-on-previous-text` | The transcript runs the full duration and reads as English, so every coverage check passes while the content is gone |
+| **Re-uploads** — X shows the poster, not the author | `yt-dlp -J` id/`t.co` cross-check in [Step 1.5](#step-15--video-posts) | The note credits the wrong person, and nothing on the page contradicts it |
 | **X Articles** — no `tweetText` element at all | `extraction.js extractLongform()`, driven per [Step 2](#step-2--x-articles-long-form) | Extraction returns `""` for a 40k-character essay |
 | **Arguments dropped into page JS** — until 2026-08-24 the adapter discarded `evaluate()` args | `_browse.evaluate()` applies them, and refuses an arrow that is not a parenthesised function literal | `focalId` arriving as `undefined` made the root walk report "not a thread" for every real thread |
 | **A logged-out browser** | `_browse.connect()` refuses anything but `headed` mode | A login wall renders as a short page, not an error |
@@ -190,6 +255,7 @@ Replace `THE_URL_HERE` with the actual URL. The exported functions:
 |---|---|
 | `window.__xExtract.extractFocal()` | the first `<article>` on the page: `{statusId, handle, displayName, content, timestamp, metrics, expectedImageCount, images}` |
 | `window.__xExtract.extractArticle(node)` | the same shape for a specific `<article>` element |
+| `window.__xExtract.extractVideo(node)` | `{present, isGif, durationLabel, seconds, poster}`, or `null` when the post has no video |
 | `window.__xExtract.extractAllByAuthor(h)` | every same-author article currently in the DOM, full content, plus `isReplyToOther`, sorted by Snowflake id |
 | `window.__xExtract.findRoot(f, h)` | `{hasEarlier, rootId, ancestors}` for focal id `f` and handle `h` |
 | `window.__xExtract.detectThreadMembers(h)` | same-author candidates as `{statusId, snippet, isReplyToOther}` — filtering to the genuine chain is the caller's job |

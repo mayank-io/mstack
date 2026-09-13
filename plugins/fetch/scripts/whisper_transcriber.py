@@ -157,6 +157,32 @@ def download_audio(source: str, output_dir: Path, cookies_file: str | None = Non
 BACKENDS = ("whisper", "mlx")
 
 
+def detect_repetition_loops(transcript: str, threshold: float = 0.6) -> list[dict]:
+    """Find segments where the decoder looped instead of transcribing speech.
+
+    Whisper's best-known failure on long audio: it conditions on its own output,
+    catches a phrase, and emits it for the rest of the file. The transcript
+    still runs to the full duration and still reads as English, so every
+    coverage check passes while the content is gone. One 53-minute lecture lost
+    its last 11 minutes this way and looked complete.
+
+    Measures the fraction of repeated 4-grams per line. Natural speech repeats
+    some; a loop repeats almost everything.
+    """
+    suspects = []
+    for line in transcript.splitlines():
+        timestamp, _, text = line.partition(" ")
+        words = text.split()
+        if len(words) < 12:
+            continue
+        grams = [tuple(words[i:i + 4]) for i in range(len(words) - 3)]
+        repeated = 1 - len(set(grams)) / len(grams)
+        if repeated > threshold:
+            suspects.append({"timestamp": timestamp, "repeated_fraction": round(repeated, 3),
+                             "text": text[:120]})
+    return suspects
+
+
 def mlx_model_repo(model: str) -> str:
     """Map a plain Whisper model name to its mlx-community Hugging Face repo.
 
@@ -170,7 +196,8 @@ def mlx_model_repo(model: str) -> str:
     return f"mlx-community/{name}"
 
 
-def build_whisper_argv(audio_path: Path, model: str, language: str, output_dir: Path) -> list[str]:
+def build_whisper_argv(audio_path: Path, model: str, language: str, output_dir: Path,
+                       condition_on_previous_text: bool = True) -> list[str]:
     """argv for the reference openai-whisper CLI (underscored flag names)."""
     cmd = [
         "whisper",
@@ -181,6 +208,9 @@ def build_whisper_argv(audio_path: Path, model: str, language: str, output_dir: 
         "--verbose", "False",
     ]
 
+    if not condition_on_previous_text:
+        cmd.extend(["--condition_on_previous_text", "False"])
+
     # Add language if not auto-detect
     if language and language != "auto":
         cmd.extend(["--language", language])
@@ -188,7 +218,8 @@ def build_whisper_argv(audio_path: Path, model: str, language: str, output_dir: 
     return cmd
 
 
-def build_mlx_argv(audio_path: Path, model: str, language: str, output_dir: Path) -> list[str]:
+def build_mlx_argv(audio_path: Path, model: str, language: str, output_dir: Path,
+                   condition_on_previous_text: bool = True) -> list[str]:
     """argv for mlx-whisper, run through uvx so nothing has to be installed.
 
     Two incompatibilities with the reference CLI, both silent if got wrong:
@@ -206,6 +237,9 @@ def build_mlx_argv(audio_path: Path, model: str, language: str, output_dir: Path
         "--verbose", "False",
     ]
 
+    if not condition_on_previous_text:
+        cmd.extend(["--condition-on-previous-text", "False"])
+
     if language and language != "auto":
         cmd.extend(["--language", language])
 
@@ -213,7 +247,8 @@ def build_mlx_argv(audio_path: Path, model: str, language: str, output_dir: Path
 
 
 def transcribe_with_whisper(audio_path: Path, model: str, language: str,
-                            output_dir: Path, backend: str = "whisper") -> tuple[str, str]:
+                            output_dir: Path, backend: str = "whisper",
+                            condition_on_previous_text: bool = True) -> tuple[str, str]:
     """Transcribe audio with Whisper, via the reference CLI or mlx-whisper.
 
     Both backends write the same JSON schema, so the segment formatting below
@@ -229,9 +264,11 @@ def transcribe_with_whisper(audio_path: Path, model: str, language: str,
                 "Refusing to fall back to a smaller model: a quieter transcript "
                 "of a figures-dense source is worse than no transcript."
             )
-        cmd = build_mlx_argv(audio_path, model, language, output_dir)
+        cmd = build_mlx_argv(audio_path, model, language, output_dir,
+                             condition_on_previous_text)
     else:
-        cmd = build_whisper_argv(audio_path, model, language, output_dir)
+        cmd = build_whisper_argv(audio_path, model, language, output_dir,
+                                 condition_on_previous_text)
 
     print(f"Transcribing with Whisper (backend={backend}, model={model}, "
           f"language={language})...", file=sys.stderr)
@@ -368,6 +405,10 @@ def main():
     parser.add_argument('--audio',
                        help='Transcribe this local audio file instead of downloading. '
                             'Metadata is still read from the URL.')
+    parser.add_argument('--no-condition-on-previous-text', action='store_true',
+                       help='Disable decoder conditioning. The fix when a transcript '
+                            'degenerates into a repeated phrase (see --help output of '
+                            'the repetition warnings this script emits on stderr).')
     parser.add_argument('--keep-audio', action='store_true',
                        help='Keep the downloaded audio file')
     parser.add_argument('--cookies',
@@ -405,8 +446,20 @@ def main():
 
             # Transcribe
             transcript, detected_lang = transcribe_with_whisper(
-                audio_file, args.model, args.language, temp_path, args.backend
+                audio_file, args.model, args.language, temp_path, args.backend,
+                not args.no_condition_on_previous_text
             )
+
+            # A looped transcript still runs the full duration and still reads
+            # as English, so no length or coverage check catches it.
+            loops = detect_repetition_loops(transcript)
+            if loops:
+                print(f"WARNING: {len(loops)} segment(s) look like a decoder "
+                      f"repetition loop, first at {loops[0]['timestamp']}. "
+                      f"Re-run with --no-condition-on-previous-text.", file=sys.stderr)
+                for loop in loops[:3]:
+                    print(f"  {loop['timestamp']} ({loop['repeated_fraction']:.0%} "
+                          f"repeated) {loop['text']}", file=sys.stderr)
 
             # Extract chapters from description
             chapters = extract_chapters(metadata.get('description', ''))
@@ -424,6 +477,8 @@ def main():
                 'transcription_method': f'whisper:{args.backend}',
                 'whisper_model': args.model,
                 'whisper_backend': args.backend,
+                'condition_on_previous_text': not args.no_condition_on_previous_text,
+                'repetition_warnings': loops,
             }
 
             # Determine output path
