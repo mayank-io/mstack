@@ -59,6 +59,8 @@ Two smaller ones, both handled by the script:
 - **A `pmc` id does not guarantee full text.** Embargoed records return a valid document with no `<body>`. The script reports abstract-only rather than an empty section.
 - **PMC citation superscripts flatten into the prose.** `presented in 1983<sup><xref>13</xref></sup>` becomes `presented in 1983.13`, which reads as a decimal. The script brackets them: `1983.[13]`.
 
+- **Figure captions are captured; figure images are not.** The PMC XML names each graphic (`ocv046f1p.jpg`) but the file is not served from a predictable URL — `/pmc/articles/<id>/bin/<name>`, the `pmc.ncbi.nlm.nih.gov` equivalent, and the legacy `utils/oa/oa.fcgi` service all returned 404 for PMID 26041386 (checked 2026-09-14). Articles inside the PMC **Open Access subset** ship their images in a downloadable package; most publisher-deposited articles, including these JAMIA ones, do not. Report figures as caption-only rather than implying the images were fetched.
+
 Abstract section labels differ between records — `METHODS` vs `MATERIAL AND METHODS`, `CONCLUSIONS` vs `CONCLUSION`. Render whatever labels arrive; do not normalise them to a fixed set.
 
 ## Output

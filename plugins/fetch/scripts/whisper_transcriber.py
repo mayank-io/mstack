@@ -2,8 +2,13 @@
 """
 Whisper Transcriber
 
-Downloads audio from YouTube using yt-dlp and transcribes using Whisper.
-Can be used standalone or as a fallback when native YouTube transcripts are unavailable.
+Downloads audio with yt-dlp and transcribes it with Whisper. Used standalone, or
+as the last-resort tier when a native YouTube transcript is unavailable.
+
+Host-agnostic. yt-dlp carries several hundred extractors, so any page it can
+pull audio from can be transcribed here: YouTube, x.com, Vimeo. YouTube needs
+two workarounds (see download_audio) that must NOT follow a generic URL, which
+is what resolve_source() classifies for.
 
 No browser: yt-dlp fetches the audio directly. Member-only videos need a cookie
 jar, which youtube_downloader.py exports from the headed gstack
@@ -11,7 +16,8 @@ session and passes in via --cookies. There was never a --chrome-profile option;
 the docstring advertised one for months.
 
 Usage:
-    python3 whisper_transcriber.py <video_url_or_id> [--model medium] [--language auto] [--cookies PATH]
+    python3 whisper_transcriber.py <url_or_youtube_id> [--model medium]
+        [--backend whisper|mlx] [--language auto] [--cookies PATH] [--audio PATH]
 
 Output:
     Prints path to JSON file with transcript in same format as youtube_downloader.py
@@ -27,32 +33,73 @@ import tempfile
 from pathlib import Path
 
 
-def extract_video_id(url_or_id: str) -> str:
-    """Extract video ID from YouTube URL or return as-is if already an ID."""
-    # Already an ID (11 characters, alphanumeric with - and _)
-    if re.match(r'^[a-zA-Z0-9_-]{11}$', url_or_id):
-        return url_or_id
-
-    # Extract from URL
-    patterns = [
-        r'[?&]v=([a-zA-Z0-9_-]{11})',
-        r'youtu\.be/([a-zA-Z0-9_-]{11})',
-        r'embed/([a-zA-Z0-9_-]{11})',
-    ]
-    for pattern in patterns:
-        match = re.search(pattern, url_or_id)
-        if match:
-            return match.group(1)
-
-    raise ValueError(f"Could not extract video ID from: {url_or_id}")
+_YOUTUBE_ID = re.compile(r'^[a-zA-Z0-9_-]{11}$')
+_YOUTUBE_HOSTS = frozenset({
+    "youtube.com", "www.youtube.com", "m.youtube.com",
+    "music.youtube.com", "youtu.be", "www.youtu.be",
+})
+_YOUTUBE_ID_IN_URL = (
+    r'[?&]v=([a-zA-Z0-9_-]{11})',
+    r'youtu\.be/([a-zA-Z0-9_-]{11})',
+    r'embed/([a-zA-Z0-9_-]{11})',
+    r'/shorts/([a-zA-Z0-9_-]{11})',
+)
 
 
-def download_audio(video_id: str, output_dir: Path, cookies_file: str | None = None) -> Path:
-    """Download audio from YouTube using yt-dlp."""
-    url = f"https://www.youtube.com/watch?v={video_id}"
-    output_path = output_dir / f"{video_id}.%(ext)s"
+def resolve_source(url_or_id: str) -> tuple[str, str]:
+    """Classify a video source and return (kind, url).
 
-    print(f"Downloading audio for {video_id}...", file=sys.stderr)
+    kind is "youtube" for YouTube hosts and for a bare 11-character video id;
+    "generic" for every other host, whose URL is handed to yt-dlp untouched.
+
+    This exists so the YouTube-only workarounds in download_audio() do not
+    follow a non-YouTube URL. Passing --extractor-args youtube:... to an x.com
+    URL is not merely useless: it is the kind of silent mismatch that makes a
+    failed fetch look like a source with no audio.
+    """
+    raw = url_or_id.strip()
+    if not raw:
+        raise ValueError("Empty video source")
+
+    # A bare YouTube id — 11 chars, no scheme, no path.
+    if "/" not in raw and _YOUTUBE_ID.match(raw):
+        return "youtube", f"https://www.youtube.com/watch?v={raw}"
+
+    url = raw if "://" in raw else f"https://{raw}"
+    host = urlparse(url).hostname or ""
+    kind = "youtube" if host.lower() in _YOUTUBE_HOSTS else "generic"
+    return kind, url
+
+
+def source_ident(kind: str, url: str) -> str:
+    """A filesystem-safe identifier for a source, for temp and output filenames.
+
+    YouTube keeps its real 11-character video id so existing output paths and
+    the caption-verification workflow stay recognisable. Everything else is
+    derived from host plus the last meaningful path segment, which for
+    x.com/<handle>/status/<id> is the status id.
+    """
+    if kind == "youtube":
+        for pattern in _YOUTUBE_ID_IN_URL:
+            match = re.search(pattern, url)
+            if match:
+                return match.group(1)
+
+    parsed = urlparse(url)
+    host = (parsed.hostname or "source").replace(".", "_")
+    segments = [seg for seg in parsed.path.split("/") if seg]
+    tail = segments[-1] if segments else ""
+    ident = f"{host}_{tail}" if tail else host
+    return re.sub(r'[^A-Za-z0-9_-]', '_', ident)[:80]
+
+
+def download_audio(source: str, output_dir: Path, cookies_file: str | None = None) -> Path:
+    """Download audio for any yt-dlp-supported URL (or bare YouTube id)."""
+    kind, url = resolve_source(source)
+    ident = source_ident(kind, url)
+    output_path = output_dir / f"{ident}.%(ext)s"
+
+    print(f"Downloading audio for {ident} ({kind})...", file=sys.stderr)
 
     cmd = [
         "yt-dlp",
@@ -63,13 +110,17 @@ def download_audio(video_id: str, output_dir: Path, cookies_file: str | None = N
         "--no-playlist",
         "--quiet",
         "--progress",
-        "--remote-components", "ejs:github",  # Required for YouTube JS challenges
-        # The default/web/ios/tv clients are blocked by YouTube's SABR/DRM and
-        # PO-token experiments ("DRM protected" / "Requested format is not
-        # available"). The android client still serves a plain audio stream and
-        # needs no n-challenge solving, so prefer it first.
-        "--extractor-args", "youtube:player_client=android,web,tv",
     ]
+
+    if kind == "youtube":
+        cmd += [
+            "--remote-components", "ejs:github",  # Required for YouTube JS challenges
+            # The default/web/ios/tv clients are blocked by YouTube's SABR/DRM and
+            # PO-token experiments ("DRM protected" / "Requested format is not
+            # available"). The android client still serves a plain audio stream and
+            # needs no n-challenge solving, so prefer it first.
+            "--extractor-args", "youtube:player_client=android,web,tv",
+        ]
 
     # Use cookies file if provided (Netscape format)
     if cookies_file:
@@ -85,11 +136,11 @@ def download_audio(video_id: str, output_dir: Path, cookies_file: str | None = N
         raise RuntimeError(f"yt-dlp failed: {result.stderr}")
 
     # Find the downloaded file
-    audio_file = output_dir / f"{video_id}.mp3"
+    audio_file = output_dir / f"{ident}.mp3"
     if not audio_file.exists():
-        # Try to find any audio file with the video ID
+        # Try to find any audio file with the source identifier
         for ext in ['mp3', 'm4a', 'opus', 'webm']:
-            candidate = output_dir / f"{video_id}.{ext}"
+            candidate = output_dir / f"{ident}.{ext}"
             if candidate.exists():
                 audio_file = candidate
                 break
@@ -156,10 +207,8 @@ def transcribe_with_whisper(audio_path: Path, model: str, language: str, output_
     return "\n".join(transcript_lines), detected_language
 
 
-def get_video_metadata(video_id: str) -> dict:
-    """Get video metadata using yt-dlp."""
-    url = f"https://www.youtube.com/watch?v={video_id}"
-
+def get_video_metadata(url: str) -> dict:
+    """Get video metadata using yt-dlp, for any supported host."""
     cmd = [
         "yt-dlp",
         "--dump-json",
@@ -191,7 +240,12 @@ def get_video_metadata(video_id: str) -> dict:
             "duration": duration,
             "description": data.get("description", ""),
             "published_date": data.get("upload_date", ""),
-            "thumbnail_url": data.get("thumbnail", f"https://i.ytimg.com/vi/{video_id}/maxresdefault.jpg"),
+            "thumbnail_url": data.get("thumbnail", ""),
+            # Non-YouTube sources carry their author here; x.com gives the handle.
+            "uploader_id": data.get("uploader_id", ""),
+            "webpage_url": data.get("webpage_url", url),
+            "source_id": data.get("id", ""),
+            "duration_seconds": data.get("duration"),
         }
     except json.JSONDecodeError:
         return {}
