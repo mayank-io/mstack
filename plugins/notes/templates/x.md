@@ -157,11 +157,12 @@ A well-sourced Article can carry 50+ external links. When there are more than ~1
 
 # Transcript
 
-*{{duration}} · transcribed with {{backend}} {{model}} · {{n}} segments · {{n}} words · verbatim, timestamps preserved.*
+*{{duration}} · transcribed with {{backend}} {{model}} · {{n}} segments · {{n}} words · cleaned by `notes:clean-transcript`, word-for-word identical to the raw transcript.*
 
-0:00 First segment...
-0:11 Second segment...
+{{cleaned prose — paragraphs, no timestamps}}
 ```
+
+`notes:clean-transcript` **strips the timestamps**; its guarantee is that the surviving token stream is the raw one unchanged. Record the tokens-in/tokens-out check in the attestation if it is worth proving.
 
 The attestation line is not decoration. It is what lets a later reader tell a `large-v3-turbo` transcript from a `tiny` one, and it must name any departure from a single straight run — a re-transcribed window, a spliced boundary, a backend switched mid-way.
 
