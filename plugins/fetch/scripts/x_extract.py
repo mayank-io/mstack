@@ -95,7 +95,7 @@ def extract_thread_here(page, handle, focal_id):
 
 
 def extract_thread(page, handle, focal_id):
-    """Direct-URL capture (e.g. download:x-post given a single URL): navigate to
+    """Direct-URL capture (e.g. fetch:x-post given a single URL): navigate to
     the post, walk to the root, extract the whole thread."""
     page.goto(f"https://x.com/{handle}/status/{focal_id}", timeout=45000)
     page.wait_for_selector("article", timeout=15000)
