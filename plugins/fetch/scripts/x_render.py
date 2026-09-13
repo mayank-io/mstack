@@ -87,6 +87,14 @@ def _video_lines(video) -> list:
     if seconds:
         lines.append(f"video_seconds: {int(seconds)}")
         lines.append(f"video_duration: {_fmt_duration(seconds)}")
+    media_id = video.get("mediaId")
+    if media_id:
+        # A Snowflake, so it timestamps the upload. Recorded whether or not it
+        # looks suspicious: the comparison is only possible if the id is kept.
+        lines.append(f'video_media_id: "{media_id}"')
+        uploaded = video.get("mediaUploaded")
+        if uploaded:
+            lines.append(f"video_uploaded: {uploaded}")
     if not video.get("isGif"):
         # Set by the transcription step, not here. Present-and-none is the
         # signal that a transcript is owed; absent would be indistinguishable

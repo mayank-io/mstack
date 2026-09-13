@@ -85,11 +85,14 @@ What it writes, under `<out_dir>`:
 | Signal | Where |
 |---|---|
 | `VIDEO_DETECTED:<status_url>\t<seconds>` | **stderr**, one line |
-| `media_type: video`, `video_duration`, `video_seconds`, `transcript: pending` | the note's frontmatter |
+| `MEDIA_PREDATES_POST:<media_id>\t<n> days\tuploaded <date>` | **stderr**, when the video is older than the post |
+| `media_type: video`, `video_duration`, `video_seconds`, `video_media_id`, `video_uploaded`, `transcript: pending` | the note's frontmatter |
 
 `transcript: pending` is the debt marker. A note that still says `pending` is unfinished.
 
-Detection reads the play button's `aria-label` (`"Play Video. 53 minutes 35 seconds long"`) — the only place X renders a duration. A video whose duration could not be read reports `media_type: video` with **no** `video_seconds`; that means *unknown*, not *short*. GIFs are flagged `media_type: gif` and owe no transcript.
+Duration comes from the play button's `aria-label` (`"Play Video. 53 minutes 35 seconds long"`) — the only place X renders one. **It is frequently absent.** On a cold load the player mounts as `<video aria-label="Embedded video">` and the duration is computed later, so a post reports `media_type: video` with **no** `video_seconds`. That means *unknown*, not *short*; take the duration from `yt-dlp -J` when you need it. GIFs are flagged `media_type: gif` and owe no transcript.
+
+**The player mounts lazily.** X renders the `tweetPhoto` container first and hydrates the video into it a beat later; extracting in between reports a video post as having no video and produces a note that reads as a complete short text post. `extraction.js mediaReady()` is the gate and `x_extract.wait_for_media()` polls it — the same trap `imagesReady()` guards for images. This is not theoretical: the first capture of the post that motivated this step missed the video entirely.
 
 ### Transcribe it
 
@@ -125,10 +128,12 @@ X shows the *poster*, not the author. Before attributing a re-upload:
 yt-dlp -J "<status_url>" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d['id'], d['duration'], d.get('description',''))"
 ```
 
-Two tells, both invisible on the rendered page:
+**The strongest tell needs no network call at all.** The poster path carries the media id — `pbs.twimg.com/amplify_video_thumb/<media_id>/…` — and that id is a Snowflake, so it timestamps the upload exactly as a status id does. The script decodes it into `video_uploaded` and warns when the video is more than a day older than the post carrying it. On the post that motivated this step the gap was **10.1 days**, which no amount of reading the page would have revealed.
 
-- **The yt-dlp `id` differs from the status id in the URL** — the media was uploaded under a different post.
-- **A `t.co` link in the description resolves to another account's status with the same duration.** Resolve with `curl -sIL -o /dev/null -w '%{url_effective}' <t.co url>`; match duration to the centisecond, which is what makes it proof rather than a guess.
+Two further tells:
+
+- **The yt-dlp `id` differs from the status id in the URL** — the media was uploaded under a different post. (It matches the `video_media_id` above.)
+- **A `t.co` link in the description resolves to another account's status with the same duration.** Resolve with `curl -sIL -o /dev/null -w '%{url_effective}' <t.co url>`; match duration to the centisecond, which is what makes it proof rather than a guess. Cross-check the other post's own `video_media_id`: identical ids are the same upload, not merely the same video.
 
 When either fires, the poster is an amplifier. Credit the content to the original author and record the re-upload — a clipping that names the wrong author is worse than no clipping.
 

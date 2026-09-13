@@ -29,6 +29,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import x_extract
+import x_snowflake
 from x_render import render_note, slugify, note_filename
 from x_media import media_filename
 
@@ -88,6 +89,24 @@ def download_open_post(page, handle, out_dir, day, download_media=True):
     # machine-parseable line on stdout; a second marker there would break every
     # caller that reads the last stdout line.
     video = root.get("video") or {}
+
+    # Date the video's own upload from its media Snowflake. A post whose media
+    # predates it by days is showing an upload made elsewhere — the only
+    # re-upload signal available without leaving the page, and one the rendered
+    # post actively contradicts by crediting the poster.
+    if video.get("mediaId"):
+        try:
+            up_ms = x_snowflake.timestamp_ms(video["mediaId"])
+            post_ms = x_snowflake.timestamp_ms(root["status_id"])
+            video["mediaUploaded"] = datetime.datetime.fromtimestamp(
+                up_ms / 1000, datetime.timezone.utc).strftime("%Y-%m-%d")
+            gap_days = (post_ms - up_ms) / 86_400_000
+            if gap_days > 1:
+                print(f"MEDIA_PREDATES_POST:{video['mediaId']}\t{gap_days:.1f} days"
+                      f"\tuploaded {video['mediaUploaded']}", file=sys.stderr)
+        except (ValueError, KeyError, TypeError):
+            pass
+
     if video.get("present") and not video.get("isGif"):
         print(f"VIDEO_DETECTED:https://x.com/{handle}/status/{root['status_id']}"
               f"\t{video.get('seconds') or ''}", file=sys.stderr)

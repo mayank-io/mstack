@@ -228,3 +228,56 @@ def test_a_gif_is_not_announced_for_transcription(monkeypatch, tmp_path, capsys)
 def test_a_text_post_is_not_announced(monkeypatch, tmp_path, capsys):
     _capture(monkeypatch, tmp_path, None)
     assert "VIDEO_DETECTED" not in capsys.readouterr().err
+
+
+# ----------------------------------------------------- lazy mount
+
+def test_media_id_is_read_off_the_poster_path():
+    # The poster path carries the media Snowflake, which timestamps the upload.
+    # It is the only re-upload signal visible without leaving the page.
+    stub = _article_stub(
+        '{"video": {getAttribute: (a) => a === "poster"'
+        '   ? "https://pbs.twimg.com/amplify_video_thumb/2095495019146641411/img/q.jpg" : null}}')
+    assert run_js(f"X.extractVideo({stub})")["mediaId"] == "2095495019146641411"
+
+
+def test_media_ready_waits_for_a_player_to_hydrate():
+    # X renders the tweetPhoto container first and mounts the player a beat
+    # later. Extracting in between reports a video post as having no video,
+    # and the note reads as a complete short text post.
+    empty = ('(() => { const holder = {querySelector: () => null, querySelectorAll: () => []};'
+             ' return {querySelectorAll: (s) => s.includes("tweetPhoto") ? [holder] : []}; })()')
+    assert run_js(f"X.mediaReady({empty})") is False
+
+    mounted = ('(() => { const holder = {querySelector: () => ({}), querySelectorAll: () => []};'
+               ' return {querySelectorAll: (s) => s.includes("tweetPhoto") ? [holder] : []}; })()')
+    assert run_js(f"X.mediaReady({mounted})") is True
+
+
+def test_a_post_with_no_media_is_ready_immediately():
+    none = "({querySelectorAll: () => []})"
+    assert run_js(f"X.mediaReady({none})") is True
+
+
+def test_media_older_than_the_post_is_announced(monkeypatch, tmp_path, capsys):
+    _capture(monkeypatch, tmp_path, {
+        "present": True, "isGif": False, "seconds": None,
+        "mediaId": "2095495019146641411"})   # uploaded 2026-09-03
+    err = capsys.readouterr().err
+    assert "MEDIA_PREDATES_POST:2095495019146641411" in err
+    assert "10.1 days" in err
+
+
+def test_media_uploaded_with_the_post_is_not_announced(monkeypatch, tmp_path, capsys):
+    _capture(monkeypatch, tmp_path, {
+        "present": True, "isGif": False, "seconds": None,
+        "mediaId": "2099165993834799120"})   # same second as the post
+    assert "MEDIA_PREDATES_POST" not in capsys.readouterr().err
+
+
+def test_the_upload_date_reaches_the_frontmatter():
+    fm = _frontmatter(x_render.render_note(_post(video={
+        "present": True, "isGif": False, "seconds": None,
+        "mediaId": "2095495019146641411", "mediaUploaded": "2026-09-03"})))
+    assert 'video_media_id: "2095495019146641411"' in fm
+    assert "video_uploaded: 2026-09-03" in fm

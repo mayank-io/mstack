@@ -56,6 +56,22 @@ def find_root(page, focal_id, handle):
     return r.get("rootId") or focal_id
 
 
+def wait_for_media(page, timeout=8.0):
+    """Block until the focal article's media has mounted, or give up.
+
+    Without this, a video post extracts as a caption with no video: the player
+    hydrates into the tweetPhoto container after `article` appears, and the
+    capture that ran first records `video: None` permanently.
+    """
+    _ensure(page)
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if page.evaluate("() => window.__xExtract.mediaReady()"):
+            return True
+        time.sleep(0.4)
+    return False
+
+
 def collect_thread_posts(page, handle, root_id, scrolls=14):
     """Collect the genuine thread's posts (full content) from the current
     conversation page. Scrolls from the TOP and unions same-author articles on
@@ -71,8 +87,14 @@ def collect_thread_posts(page, handle, root_id, scrolls=14):
         _ensure(page)
         for pd in (page.evaluate("(h) => window.__xExtract.extractAllByAuthor(h)", handle) or []):
             sid = pd.get("statusId")
-            if sid and sid not in collected and (pd.get("content") or "").strip():
+            if not sid or not (pd.get("content") or "").strip():
+                continue
+            if sid not in collected:
                 collected[sid] = pd
+            elif pd.get("video") and not collected[sid].get("video"):
+                # First sighting wins for text, but a sighting taken before the
+                # player mounted must not lock in "this post has no video".
+                collected[sid]["video"] = pd["video"]
         before = page.evaluate("window.scrollY")
         page.evaluate("window.scrollBy(0, Math.floor(window.innerHeight*0.85))")
         time.sleep(0.9)
@@ -100,6 +122,7 @@ def extract_thread_here(page, handle, focal_id):
     """The page is ALREADY ON the post (e.g. opened in a new tab). Walk to the
     root and extract the whole thread. Returns {root_id, is_thread, posts}."""
     _ensure(page)
+    wait_for_media(page)
     root_id = find_root(page, focal_id, handle)
     posts = collect_thread_posts(page, handle, root_id)
     return {"root_id": root_id, "is_thread": len(posts) > 1, "posts": posts}
@@ -116,5 +139,6 @@ def extract_thread(page, handle, focal_id):
         page.goto(f"https://x.com/{handle}/status/{root_id}", timeout=45000)
         page.wait_for_selector("article", timeout=15000)
         time.sleep(1.2)
+    wait_for_media(page)
     posts = collect_thread_posts(page, handle, root_id)
     return {"root_id": root_id, "is_thread": len(posts) > 1, "posts": posts}

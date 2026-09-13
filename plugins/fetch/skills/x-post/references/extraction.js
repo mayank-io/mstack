@@ -75,6 +75,10 @@
     const videoEl = article.querySelector('video');
     if (!player && !playBtn && !videoEl) return null;
 
+    // The duration label is NOT always in the DOM. On a cold load the player
+    // renders <video aria-label="Embedded video"> with no duration anywhere;
+    // the "Play Video. 53 minutes 35 seconds long" name is computed later.
+    // Absent duration therefore means unknown, never short.
     const label = (playBtn && playBtn.getAttribute('aria-label')) || '';
     const seconds = parseVideoDuration(label);
 
@@ -88,7 +92,31 @@
     // a normal image and has to be read off the <video> element.
     const poster = (videoEl && videoEl.getAttribute('poster')) || '';
 
-    return { present: true, isGif, durationLabel: label, seconds, poster };
+    // The poster path carries the MEDIA id, which is a Snowflake like the
+    // status id and so timestamps when the video was uploaded. A post whose
+    // media predates it by days is showing someone else's upload — the one
+    // re-upload signal that is visible without leaving the page.
+    const m = poster.match(/(?:amplify_video_thumb|ext_tw_video_thumb)\/(\d+)\//);
+    const mediaId = m ? m[1] : '';
+
+    return { present: true, isGif, durationLabel: label, seconds, poster, mediaId };
+  }
+
+  // Has the media in this article finished mounting?
+  //
+  // X renders the tweetPhoto container first and hydrates the player into it a
+  // beat later, so extracting the instant `article` appears reports a video
+  // post as having no video at all — the same lazy-mount trap imagesReady()
+  // guards for images, and just as silent: the note looks like a short text
+  // post and nothing errors.
+  function mediaReady(article) {
+    const a = article || document.querySelector('article');
+    if (!a) return false;
+    const holders = a.querySelectorAll('[data-testid="tweetPhoto"]');
+    if (!holders.length) return true;   // nothing to wait for
+    return Array.from(holders).every((h) =>
+      h.querySelector('[data-testid="videoPlayer"], [data-testid="videoComponent"], video') ||
+      Array.from(h.querySelectorAll('img')).some((i) => i.src && i.src.includes('pbs.twimg.com')));
   }
 
   // Extract one <article> node's full data (author, text, time, metrics, images).
@@ -243,5 +271,5 @@
   window.__xExtract = { extractFocal, extractArticle, extractAllByAuthor,
                         findRoot, detectThreadMembers, extractLongform,
                         imagesReady, statusIdOf, handleOf,
-                        extractVideo, parseVideoDuration };
+                        extractVideo, parseVideoDuration, mediaReady };
 })();
