@@ -43,6 +43,9 @@ def _normalize(d, handle, status_id):
         "metrics": d.get("metrics") or {"likes": 0, "reposts": 0, "views": 0, "replies": 0},
         "images": d.get("images") or [],
         "expected_images": d.get("expectedImageCount") or 0,
+        # None when the post has no video. Dropping this here is what made
+        # every video post extract as a caption with no content behind it.
+        "video": d.get("video") or None,
     }
 
 

@@ -48,15 +48,19 @@ Set `NCBI_API_KEY` to raise the rate limit from 3 to 10 requests/second, and `NC
 2. **Check the abstract reassembles.** A structured abstract's sections should read as continuous prose. A section ending mid-clause means inline markup truncated it.
 3. **Say whether full text was retrieved.** The script prints `full text: <n> chars` or `full text: unavailable — abstract only` to stderr. Abstract-only is a normal outcome, not a failure — but report which one happened rather than letting the reader assume.
 
-## Notes — three traps, each measured on a real record
+## Notes — the traps, each measured on a real record
 
 - **Scope the article ids.** `.//ArticleIdList/ArticleId` also matches the id list inside every `<Reference>`: on PMID 26041386 that is **103 ids instead of 4**, and the first `doi` among them belongs to a *cited* paper. The record parses cleanly and points at the wrong article. The anchored path is `PubmedData/ArticleIdList`.
 - **Never use `elem.text` on PubMed XML.** `.text` is the text *before the first child element*, not the element's text. `<ArticleTitle>Risk of <i>P. falciparum</i> infection</ArticleTitle>` yields `"Risk of "` — a truncation with no error and no marker. Use `''.join(elem.itertext())` throughout.
 - **MeSH indexing is not guaranteed.** PMID 29036387 has no `MeshHeadingList` at all — newer and unindexed records simply lack one. Treat its absence as normal, never as a failed parse.
 
-Two smaller ones, both handled by the script:
+- **Figures and tables are nested *inside* the prose, not beside it.** JATS puts `<fig>` and `<table-wrap>` within a `<p>`, so a naive flatten does two things at once: the caption is glued into the surrounding sentence, and `.//p` matches the caption's own `<p>` a second time as a body paragraph. Worse, a flattened `<table>` becomes `Atrial fibrillation48 961Yes<0.001MarchOctober` — corrupted data wearing the shape of prose. The script detaches floats before reading the body (handing the float's tail text back to its parent) and renders tables as real markdown grids. On PMID 26041386 this is the difference between a 35,603-character body and a 29,323-character one; the missing 6,280 characters were duplicated captions and mangled table cells.
+- **Resolve `colspan` and `rowspan` before emitting rows.** Table 2 of PMID 26041386 heads two columns with a colspan'd *Birth Month Risk* over *High*/*Low*, and rowspans the five columns to its left. Appending cells in document order puts *High*/*Low* under *EHR Condition* and *N* — every column label wrong, in a table that still renders perfectly well-formed.
+
+Three smaller ones, all handled by the script:
 
 - **A `pmc` id does not guarantee full text.** Embargoed records return a valid document with no `<body>`. The script reports abstract-only rather than an empty section.
+- **A cell can be legitimately empty.** Table 2's *Seasonal Pattern* column holds sparkline graphics, not text, so it comes through blank. That is the honest rendering — the column exists and its content is an image the record does not hand over.
 - **PMC citation superscripts flatten into the prose.** `presented in 1983<sup><xref>13</xref></sup>` becomes `presented in 1983.13`, which reads as a decimal. The script brackets them: `1983.[13]`.
 
 - **Figure captions are captured; figure images are not.** The PMC XML names each graphic (`ocv046f1p.jpg`) but the file is not served from a predictable URL — `/pmc/articles/<id>/bin/<name>`, the `pmc.ncbi.nlm.nih.gov` equivalent, and the legacy `utils/oa/oa.fcgi` service all returned 404 for PMID 26041386 (checked 2026-09-14). Articles inside the PMC **Open Access subset** ship their images in a downloadable package; most publisher-deposited articles, including these JAMIA ones, do not. Report figures as caption-only rather than implying the images were fetched.

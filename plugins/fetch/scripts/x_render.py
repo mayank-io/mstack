@@ -62,6 +62,39 @@ def _image_lines(image_files) -> list:
     ]
 
 
+def _fmt_duration(seconds) -> str:
+    """H:MM:SS or M:SS, matching the transcript timestamp format."""
+    seconds = int(seconds)
+    h, m, s = seconds // 3600, (seconds % 3600) // 60, seconds % 60
+    return f"{h}:{m:02d}:{s:02d}" if h else f"{m}:{s:02d}"
+
+
+def _video_lines(video) -> list:
+    """Frontmatter keys for a video post.
+
+    `media:` is already an integer image count, so the kind of media goes in
+    `media_type:` — which is also what the existing video clippings use.
+
+    A duration that could not be read is OMITTED rather than written as 0. A
+    real zero-second video and an unread duration are different facts, and 0
+    reads as "too short to bother transcribing" — exactly the wrong conclusion
+    for the 53-minute lecture this was built for.
+    """
+    if not video or not video.get("present"):
+        return []
+    lines = ["media_type: gif" if video.get("isGif") else "media_type: video"]
+    seconds = video.get("seconds")
+    if seconds:
+        lines.append(f"video_seconds: {int(seconds)}")
+        lines.append(f"video_duration: {_fmt_duration(seconds)}")
+    if not video.get("isGif"):
+        # Set by the transcription step, not here. Present-and-none is the
+        # signal that a transcript is owed; absent would be indistinguishable
+        # from a text post.
+        lines.append("transcript: pending")
+    return lines
+
+
 def render_note(post: dict) -> str:
     """Render the full Markdown note (YAML frontmatter + body) for a single
     X post or thread. Emits zero vault syntax (no wikilinks, no daily-note
@@ -97,6 +130,7 @@ def render_note(post: dict) -> str:
         f"views: {views}",
         f"media: {media}",
     ]
+    lines += _video_lines(post.get("video"))
     if post.get("harvest_run"):
         lines.append(f"harvest_run: {post['harvest_run']}")
     lines += ["---", ""]

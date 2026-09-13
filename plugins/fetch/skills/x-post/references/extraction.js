@@ -47,6 +47,50 @@
     return metrics;
   }
 
+  // Duration of a video, in seconds, from the play button's aria-label.
+  //
+  // The label — "Play Video. 53 minutes 35 seconds long" — is the ONLY place X
+  // renders a duration in the DOM. There is no data attribute and no visible
+  // text carrying it, so losing this label means losing the one signal that
+  // says whether a post is a 12-second clip or a 53-minute lecture.
+  function parseVideoDuration(ariaLabel) {
+    if (!ariaLabel) return null;
+    const unit = (pat) => { const m = ariaLabel.match(pat); return m ? parseInt(m[1], 10) : 0; };
+    const hours = unit(/(\d+)\s*hours?/i);
+    const minutes = unit(/(\d+)\s*minutes?/i);
+    const seconds = unit(/(\d+)\s*seconds?/i);
+    if (!hours && !minutes && !seconds) return null;
+    return hours * 3600 + minutes * 60 + seconds;
+  }
+
+  // Video presence and duration for one <article>.
+  //
+  // A video post whose capture holds only the caption is not a capture: the
+  // caption is the hook and the video is the content. Detection lives here so
+  // the driver can decide to transcribe; transcription itself cannot run in
+  // the extractor (a 53-minute source outlives any page-script budget).
+  function extractVideo(article) {
+    const player = article.querySelector('[data-testid="videoPlayer"], [data-testid="videoComponent"]');
+    const playBtn = article.querySelector('[aria-label*="Play Video" i], [aria-label*="Play Tweet video" i]');
+    const videoEl = article.querySelector('video');
+    if (!player && !playBtn && !videoEl) return null;
+
+    const label = (playBtn && playBtn.getAttribute('aria-label')) || '';
+    const seconds = parseVideoDuration(label);
+
+    // A GIF is rendered with the same machinery but carries no duration and is
+    // silent. Transcribing one wastes minutes and yields nothing.
+    const isGif = /\bGIF\b/i.test(label) ||
+                  !!article.querySelector('[data-testid="placementTracking"] [aria-label*="GIF" i]');
+
+    // The poster lives on ext_tw_video_thumb / amplify_video_thumb, NOT on the
+    // /media path the image extractor filters for, so it is never picked up as
+    // a normal image and has to be read off the <video> element.
+    const poster = (videoEl && videoEl.getAttribute('poster')) || '';
+
+    return { present: true, isGif, durationLabel: label, seconds, poster };
+  }
+
   // Extract one <article> node's full data (author, text, time, metrics, images).
   function extractArticle(article) {
     let handle = '';
@@ -89,8 +133,10 @@
       .filter((img) => img.src && img.src.includes('pbs.twimg.com/media'))
       .map((img) => img.src.replace(/name=\w+/, 'name=orig'));
 
+    const video = extractVideo(article);
+
     return { statusId: statusIdOf(article), handle, displayName, content, timestamp, metrics,
-             expectedImageCount: photoLinks.length, images };
+             expectedImageCount: photoLinks.length, images, video };
   }
 
   // Step 2 — extract the focal (first) article on the current page.
@@ -196,5 +242,6 @@
 
   window.__xExtract = { extractFocal, extractArticle, extractAllByAuthor,
                         findRoot, detectThreadMembers, extractLongform,
-                        imagesReady, statusIdOf, handleOf };
+                        imagesReady, statusIdOf, handleOf,
+                        extractVideo, parseVideoDuration };
 })();

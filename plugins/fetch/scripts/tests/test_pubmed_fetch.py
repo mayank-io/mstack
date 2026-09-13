@@ -280,3 +280,177 @@ def test_no_marker_is_printed_when_the_fetch_fails(capsys, monkeypatch):
     out = capsys.readouterr()
     assert "OUTPUT_DIR:" not in out.out
     assert "ERROR: boom" in out.err
+
+
+# ------------------------------------------------- floats nested inside the prose
+
+INLINE_FLOAT_PMC_XML = b"""<?xml version="1.0"?>
+<article>
+  <front><article-meta>
+    <article-id pub-id-type="pmid">26041386</article-id>
+  </article-meta></front>
+  <body>
+    <sec><title>RESULTS</title>
+      <p>We found 55 conditions.
+        <table-wrap id="T2"><label>Table 2:</label>
+          <caption><p>Conditions by birth month.</p></caption>
+          <table>
+            <thead><tr><th>Condition</th><th>N</th><th>High</th></tr></thead>
+            <tbody>
+              <tr><td>Atrial fibrillation</td><td>48 961</td><td>March</td></tr>
+              <tr><td>Essential hypertension</td><td>269 913</td><td>January</td></tr>
+            </tbody>
+          </table>
+        </table-wrap>
+        Nine of them were cardiovascular.</p>
+      <p>An unrelated paragraph.
+        <fig id="F1"><label>Figure 3:</label><caption><p>The SeaWAS pipeline.</p></caption></fig>
+      </p>
+    </sec>
+  </body>
+</article>"""
+
+
+def test_a_float_nested_in_a_paragraph_does_not_leak_into_the_prose():
+    """JATS nests <table-wrap> inside <p>. Flattening produces
+    'Atrial fibrillation48 961March' glued into the sentence — corrupted data
+    that reads as prose, with nothing to signal it went wrong."""
+    full = pubmed_fetch.parse_pmc(INLINE_FLOAT_PMC_XML)
+    prose = " ".join(p for s in full["sections"] for p in s["paragraphs"])
+    assert "48 961" not in prose
+    assert "Atrial fibrillation" not in prose
+    assert "SeaWAS pipeline" not in prose
+    assert "Conditions by birth month" not in prose
+
+
+def test_prose_on_both_sides_of_a_detached_float_survives():
+    """The float's tail is real sentence text and must be handed back."""
+    full = pubmed_fetch.parse_pmc(INLINE_FLOAT_PMC_XML)
+    paras = full["sections"][0]["paragraphs"]
+    assert "We found 55 conditions." in paras[0]
+    assert "Nine of them were cardiovascular." in paras[0]
+
+
+def test_a_caption_is_not_also_counted_as_a_body_paragraph():
+    """`.//p` matches the caption's own <p>, so an un-detached caption is
+    captured twice — once inline, once as a paragraph of its own."""
+    full = pubmed_fetch.parse_pmc(INLINE_FLOAT_PMC_XML)
+    paras = full["sections"][0]["paragraphs"]
+    assert len(paras) == 2, paras
+
+
+def test_table_grids_are_captured_as_rows():
+    full = pubmed_fetch.parse_pmc(INLINE_FLOAT_PMC_XML)
+    assert full["tables"][0]["rows"] == [
+        ["Condition", "N", "High"],
+        ["Atrial fibrillation", "48 961", "March"],
+        ["Essential hypertension", "269 913", "January"],
+    ]
+
+
+def test_a_table_renders_as_a_markdown_table_not_a_bullet():
+    rec = pubmed_fetch.parse_pubmed(ARTICLE_XML)
+    md = pubmed_fetch.render_markdown(rec, pubmed_fetch.parse_pmc(INLINE_FLOAT_PMC_XML))
+    assert "| Condition | N | High |" in md
+    assert "| Atrial fibrillation | 48 961 | March |" in md
+
+
+def test_floats_hoisted_into_floats_group_are_still_found():
+    """The other PMC layout: floats live outside <body> entirely."""
+    full = pubmed_fetch.parse_pmc(PMC_XML)
+    assert [f["label"] for f in full["figures"]] == ["Figure 1"]
+    assert [t["label"] for t in full["tables"]] == ["Table 1"]
+
+
+def test_a_caption_only_table_says_so_rather_than_rendering_an_empty_grid():
+    rec = pubmed_fetch.parse_pubmed(ARTICLE_XML)
+    md = pubmed_fetch.render_markdown(rec, pubmed_fetch.parse_pmc(PMC_XML))
+    assert "*(table grid not present in the PMC record)*" in md
+
+
+def test_a_pipe_in_a_cell_does_not_break_the_markdown_table():
+    rows = [["a", "b|c"], ["d", "e"]]
+    assert r"b\|c" in "\n".join(pubmed_fetch._render_table(rows))
+
+
+def test_ragged_rows_are_padded_not_truncated():
+    """A row shorter than the header must keep its cells, not lose them."""
+    out = pubmed_fetch._render_table([["a", "b", "c"], ["x"]])
+    assert out[-1] == "| x |  |  |"
+
+
+# ------------------------------------------------------------------- CLI parsing
+
+def test_an_unknown_flag_is_rejected_rather_than_used_as_a_directory(capsys, monkeypatch):
+    """`--output-dir X` once created a directory literally named "--output-dir".
+    A wrong destination that exits 0 is worse than any crash."""
+    monkeypatch.setattr(pubmed_fetch, "fetch",
+                        lambda *_a, **_k: pytest.fail("fetch ran on a bad argv"))
+    assert pubmed_fetch.main(["26041386", "--nonsense", "/tmp/x"]) == 2
+    assert "unknown option --nonsense" in capsys.readouterr().err
+
+
+def test_output_dir_flag_and_positional_agree(monkeypatch):
+    seen = []
+    monkeypatch.setattr(pubmed_fetch, "fetch",
+                        lambda ref, out: seen.append((ref, out)) or Path(out))
+    pubmed_fetch.main(["26041386", "--output-dir", "/tmp/a"])
+    pubmed_fetch.main(["26041386", "/tmp/a"])
+    assert seen[0] == seen[1] == ("26041386", Path("/tmp/a"))
+
+
+def test_a_flag_with_no_value_does_not_silently_default(capsys):
+    assert pubmed_fetch.main(["26041386", "--output-dir"]) == 2
+    assert "needs a directory" in capsys.readouterr().err
+
+
+def test_no_arguments_is_a_usage_error(capsys):
+    assert pubmed_fetch.main([]) == 2
+    assert "usage:" in capsys.readouterr().err
+
+
+# ------------------------------------------------------------------ table spans
+
+SPANNED_TABLE_XML = b"""<?xml version="1.0"?>
+<article><front><article-meta>
+  <article-id pub-id-type="pmid">26041386</article-id>
+</article-meta></front>
+<body><sec><title>RESULTS</title><p>Text.
+  <table-wrap><label>Table 2</label><caption><p>Spanned.</p></caption>
+    <table>
+      <thead>
+        <tr><th rowspan="2">Condition</th><th rowspan="2">N</th><th colspan="2">Birth Month Risk</th></tr>
+        <tr><th>High</th><th>Low</th></tr>
+      </thead>
+      <tbody><tr><td>Atrial fibrillation</td><td>48 961</td><td>March</td><td>October</td></tr></tbody>
+    </table>
+  </table-wrap></p></sec></body></article>"""
+
+
+def test_rowspan_does_not_shift_the_second_header_row_left():
+    """Appending cells in document order puts High/Low under Condition and N —
+    every column mislabelled, in a table that still looks well-formed."""
+    rows = pubmed_fetch.parse_pmc(SPANNED_TABLE_XML)["tables"][0]["rows"]
+    assert rows[1] == ["", "", "High", "Low"]
+
+
+def test_colspan_reserves_the_columns_it_covers():
+    rows = pubmed_fetch.parse_pmc(SPANNED_TABLE_XML)["tables"][0]["rows"]
+    assert rows[0] == ["Condition", "N", "Birth Month Risk", ""]
+
+
+def test_every_row_of_a_spanned_table_is_the_same_width():
+    rows = pubmed_fetch.parse_pmc(SPANNED_TABLE_XML)["tables"][0]["rows"]
+    assert {len(r) for r in rows} == {4}
+
+
+def test_data_lands_under_the_header_it_belongs_to():
+    rows = pubmed_fetch.parse_pmc(SPANNED_TABLE_XML)["tables"][0]["rows"]
+    high = rows[1].index("High")
+    assert rows[2][high] == "March"
+    assert rows[2][rows[1].index("Low")] == "October"
+
+
+def test_a_malformed_span_attribute_does_not_crash_the_parse():
+    xml = SPANNED_TABLE_XML.replace(b'colspan="2"', b'colspan="oops"')
+    assert pubmed_fetch.parse_pmc(xml)["tables"][0]["rows"]

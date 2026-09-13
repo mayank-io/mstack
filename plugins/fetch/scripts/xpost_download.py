@@ -82,7 +82,16 @@ def download_open_post(page, handle, out_dir, day, download_media=True):
         "post_type": "thread" if th["is_thread"] else "post",
         "thread_length": len(th["posts"]), "metrics": root["metrics"], "media": media,
         "content": root["content"], "image_files": sections[0]["image_files"], "sections": sections,
+        "video": root.get("video"),
     }
+    # Announce video on stderr only. `OUTPUT_FILE:` must remain the sole
+    # machine-parseable line on stdout; a second marker there would break every
+    # caller that reads the last stdout line.
+    video = root.get("video") or {}
+    if video.get("present") and not video.get("isGif"):
+        print(f"VIDEO_DETECTED:https://x.com/{handle}/status/{root['status_id']}"
+              f"\t{video.get('seconds') or ''}", file=sys.stderr)
+
     slug = slugify(root["content"] or root["status_id"]) or root["status_id"]
     fname = note_filename(date, handle, slug)
     with open(os.path.join(posts_dir, fname), "w") as f:

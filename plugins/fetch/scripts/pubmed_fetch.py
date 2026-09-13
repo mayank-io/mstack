@@ -272,6 +272,95 @@ def _label(el) -> str:
     return _text(el).rstrip(":.—- ")
 
 
+FLOAT_TAGS = ("fig", "table-wrap", "supplementary-material")
+
+
+def _detach_floats(body):
+    """Remove figures, tables and supplements from the body tree.
+
+    JATS nests <fig> and <table-wrap> INSIDE a <p>, so leaving them in place
+    corrupts the prose twice over: the caption flattens into the surrounding
+    paragraph, and `.//p` matches the caption's own <p> as a body paragraph.
+    A flattened <table> is worse than duplicated — "Atrial fibrillation48
+    961Yes<0.001MarchOctober" is unreadable, and reads as prose rather than as
+    a mangled table. Floats are captured separately and rendered properly.
+    """
+    detached = []
+    parents = {child: parent for parent in body.iter() for child in parent}
+    for el in list(body.iter()):
+        if el.tag in FLOAT_TAGS and el in parents:
+            parent = parents[el]
+            # The float's tail is real prose — hand it back to the parent.
+            if el.tail and el.tail.strip():
+                previous = list(parent)
+                idx = previous.index(el)
+                if idx == 0:
+                    parent.text = (parent.text or "") + el.tail
+                else:
+                    sib = previous[idx - 1]
+                    sib.tail = (sib.tail or "") + el.tail
+            parent.remove(el)
+            detached.append(el)
+    return detached
+
+
+def _span(cell, attr: int) -> int:
+    """A colspan/rowspan value, clamped. PMC ships the odd 'colspan="0"'."""
+    try:
+        return max(1, min(64, int(cell.get(attr) or 1)))
+    except ValueError:
+        return 1
+
+
+def _parse_table(table_wrap) -> list[list[str]]:
+    """A JATS <table> as a rectangular grid. Empty when there is no grid to read.
+
+    Spans have to be resolved, not ignored. Table 2 of PMID 26041386 heads two
+    columns with a colspan'd "Birth Month Risk" over "High"/"Low", and rowspans
+    the five columns to its left. Appending cells in document order puts
+    "High"/"Low" under "EHR Condition" and "N" — every column label wrong, in a
+    table that still looks perfectly well-formed.
+    """
+    table = table_wrap.find(".//table")
+    if table is None:
+        return []
+
+    grid: dict[tuple[int, int], str] = {}
+    taken: set[tuple[int, int]] = set()
+    height = 0
+    for r, tr in enumerate(table.iter("tr")):
+        height = r + 1
+        c = 0
+        for cell in (e for e in tr if e.tag in ("th", "td")):
+            while (r, c) in taken:
+                c += 1
+            cols, rows_ = _span(cell, "colspan"), _span(cell, "rowspan")
+            grid[(r, c)] = _text(cell)
+            for dr in range(rows_):
+                for dc in range(cols):
+                    taken.add((r + dr, c + dc))
+            c += cols
+
+    if not grid:
+        return []
+    width = max(c for _, c in taken) + 1
+    out = [[grid.get((r, c), "") for c in range(width)] for r in range(height)]
+    return [row for row in out if any(row)]
+
+
+def _render_table(rows: list[list[str]]) -> list[str]:
+    """Markdown table. Ragged rows are padded, never truncated."""
+    if not rows:
+        return []
+    width = max(len(r) for r in rows)
+    padded = [r + [""] * (width - len(r)) for r in rows]
+    esc = lambda c: c.replace("|", "\\|")
+    out = ["| " + " | ".join(esc(c) for c in padded[0]) + " |",
+           "|" + "---|" * width]
+    out += ["| " + " | ".join(esc(c) for c in r) + " |" for r in padded[1:]]
+    return out
+
+
 def parse_pmc(xml_bytes: bytes) -> dict | None:
     """Structured full text from a PMC record, or None when there is no body.
 
@@ -284,6 +373,16 @@ def parse_pmc(xml_bytes: bytes) -> dict | None:
         return None
     _bracket_citations(root)
 
+    # Search from the root, not the body: PMC puts floats in either place — inline
+    # in a <p> on some records, hoisted into <floats-group> on others. Collect
+    # BEFORE detaching, because detaching mutates the tree.
+    figures = [{"label": _label(f.find("label")), "caption": _text(f.find("caption"))}
+               for f in root.iter("fig")]
+    tables = [{"label": _label(t.find("label")), "caption": _text(t.find("caption")),
+               "rows": _parse_table(t)}
+              for t in root.iter("table-wrap")]
+    _detach_floats(body)
+
     sections = []
     for sec in body.findall("./sec"):
         sections.append({
@@ -295,14 +394,8 @@ def parse_pmc(xml_bytes: bytes) -> dict | None:
     return {
         "sections": sections,
         "intro_paragraphs": loose,
-        "figures": [
-            {"label": _label(f.find("label")), "caption": _text(f.find("caption"))}
-            for f in root.findall(".//fig")
-        ],
-        "tables": [
-            {"label": _label(t.find("label")), "caption": _text(t.find("caption"))}
-            for t in root.findall(".//table-wrap")
-        ],
+        "figures": figures,
+        "tables": tables,
         "char_count": len(_text(body)),
     }
 
@@ -355,9 +448,13 @@ def render_markdown(rec: dict, full: dict | None) -> str:
                 f"- **{f['label'] or 'Figure'}** — {f['caption']}" for f in full["figures"]
             ] + [""]
         if full["tables"]:
-            out += ["### Tables", ""] + [
-                f"- **{t['label'] or 'Table'}** — {t['caption']}" for t in full["tables"]
-            ] + [""]
+            out += ["### Tables", ""]
+            for t in full["tables"]:
+                out += [f"**{t['label'] or 'Table'}** — {t['caption']}", ""]
+                if t["rows"]:
+                    out += _render_table(t["rows"]) + [""]
+                else:
+                    out += ["*(table grid not present in the PMC record)*", ""]
     else:
         out += ["---", "", "*Full text not retrievable from PMC — abstract only.*", ""]
 
@@ -413,12 +510,41 @@ def fetch(reference: str, out_dir: Path) -> Path:
 
 
 def main(argv: list[str]) -> int:
-    if not argv:
-        print("usage: pubmed_fetch.py <pubmed-url|pmid|pmcid|doi> [output_dir]", file=sys.stderr)
+    usage = "usage: pubmed_fetch.py <pubmed-url|pmid|pmcid|doi> [output_dir]"
+
+    # Accept --output-dir as well as the positional form, and reject any other
+    # flag outright. A bare argv scan would otherwise take "--output-dir" itself
+    # as the destination and cheerfully create a directory by that name in the
+    # caller's cwd — a silent wrong answer, which is the one outcome worth
+    # spending code to prevent.
+    args, out_flag = [], None
+    it = iter(argv)
+    for a in it:
+        if a in ("-o", "--output-dir"):
+            out_flag = next(it, None)
+            if out_flag is None:
+                print(f"ERROR: {a} needs a directory\n{usage}", file=sys.stderr)
+                return 2
+        elif a in ("-h", "--help"):
+            print(usage)
+            return 0
+        elif a.startswith("-") and a != "-":
+            print(f"ERROR: unknown option {a}\n{usage}", file=sys.stderr)
+            return 2
+        else:
+            args.append(a)
+
+    if not args:
+        print(usage, file=sys.stderr)
         return 2
-    out = Path(argv[1]).expanduser() if len(argv) > 1 else Path.cwd() / f"pubmed-{int(time.time())}"
+    if len(args) > 2 or (out_flag and len(args) > 1):
+        print(f"ERROR: too many arguments\n{usage}", file=sys.stderr)
+        return 2
+
+    dest = out_flag or (args[1] if len(args) > 1 else None)
+    out = Path(dest).expanduser() if dest else Path.cwd() / f"pubmed-{int(time.time())}"
     try:
-        resolved = fetch(argv[0], out)
+        resolved = fetch(args[0], out)
     except PubMedError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
