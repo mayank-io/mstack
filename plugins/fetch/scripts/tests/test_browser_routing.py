@@ -159,8 +159,15 @@ def test_scripts_that_do_no_browser_work_stay_that_way():
     """whisper_transcriber and verify_caption_window reach YouTube through
     yt-dlp, never a browser. Pinned so a future edit does not add an unguarded
     browser path — and so the member-only cookie jar keeps arriving via
-    --cookies from the headed session rather than being re-fetched here."""
-    for name in ("whisper_transcriber.py", "verify_caption_window.py"):
+    --cookies from the headed session rather than being re-fetched here.
+
+    pubmed_fetch is browserless for a different reason: NCBI E-utilities serve
+    the whole corpus as XML over plain HTTP with no login and no JavaScript.
+    Rendering pubmed.ncbi.nlm.nih.gov in a browser would scrape a view of data
+    the API returns structured, drop the MeSH qualifiers and affiliations that
+    never appear on the page, and miss the PMC full text entirely."""
+    for name in ("whisper_transcriber.py", "verify_caption_window.py",
+                 "pubmed_fetch.py"):
         src = _src(name)
         for banned in ("playwright", "chromium", "browse_page", "BrowsePage",
                        "webdriver", "selenium"):

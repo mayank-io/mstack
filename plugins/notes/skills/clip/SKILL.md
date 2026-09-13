@@ -23,6 +23,7 @@ Match on the URL's host and path.
 | `*.notion.site`, `notion.so` | `fetch:notion-public-site` | `notion.md` |
 | `scribd.com` | `fetch:scribd-document` | `article.md` |
 | `alphaxiv.org`, `arxiv.org` | `fetch:alphaxiv-paper` | `paper.md` |
+| `pubmed.ncbi.nlm.nih.gov`, `ncbi.nlm.nih.gov/pmc` | `fetch:pubmed-nlm` | `paper.md` |
 | `instagram.com` | `fetch:ig-post` | `article.md` |
 | PDF (any host, incl. Drive/Dropbox) | `curl` → `notes:save-local-file` | — |
 | anything else | `fetch:blog-post` | `article.md` |
