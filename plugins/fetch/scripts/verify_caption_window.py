@@ -32,7 +32,7 @@ from pathlib import Path
 # Reuse the extractor's video-id parsing and the (android-client) audio download.
 _SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(_SCRIPT_DIR))
-from whisper_transcriber import extract_video_id, download_audio  # noqa: E402
+from whisper_transcriber import resolve_source, source_ident, download_audio  # noqa: E402
 
 
 def _parse_window(token: str) -> tuple[int, int]:
@@ -108,12 +108,13 @@ def main() -> None:
         print("No windows given", file=sys.stderr)
         sys.exit(2)
 
-    video_id = extract_video_id(args.url)
+    kind, url = resolve_source(args.url)
+    video_id = source_ident(kind, url)
 
     with tempfile.TemporaryDirectory(prefix=f"verify_{video_id}_") as td:
         tmp = Path(td)
-        print(f"Downloading audio for {video_id} (android client)...", file=sys.stderr)
-        audio = download_audio(video_id, tmp, args.cookies)
+        print(f"Downloading audio for {video_id} ({kind})...", file=sys.stderr)
+        audio = download_audio(url, tmp, args.cookies)
 
         out_windows = []
         for start, end in windows:

@@ -27,10 +27,12 @@ import argparse
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from urllib.parse import urlparse
 
 
 _YOUTUBE_ID = re.compile(r'^[a-zA-Z0-9_-]{11}$')
@@ -152,10 +154,24 @@ def download_audio(source: str, output_dir: Path, cookies_file: str | None = Non
     return audio_file
 
 
-def transcribe_with_whisper(audio_path: Path, model: str, language: str, output_dir: Path) -> str:
-    """Transcribe audio using Whisper CLI."""
-    print(f"Transcribing with Whisper (model={model}, language={language})...", file=sys.stderr)
+BACKENDS = ("whisper", "mlx")
 
+
+def mlx_model_repo(model: str) -> str:
+    """Map a plain Whisper model name to its mlx-community Hugging Face repo.
+
+    `--model medium` means the same size on both backends; only the address
+    differs. A value that already names a repo or a local directory is passed
+    through, so `--model mlx-community/whisper-large-v3-turbo` still works.
+    """
+    if "/" in model or os.path.isdir(model):
+        return model
+    name = model if model.startswith("whisper-") else f"whisper-{model}"
+    return f"mlx-community/{name}"
+
+
+def build_whisper_argv(audio_path: Path, model: str, language: str, output_dir: Path) -> list[str]:
+    """argv for the reference openai-whisper CLI (underscored flag names)."""
     cmd = [
         "whisper",
         str(audio_path),
@@ -169,9 +185,60 @@ def transcribe_with_whisper(audio_path: Path, model: str, language: str, output_
     if language and language != "auto":
         cmd.extend(["--language", language])
 
+    return cmd
+
+
+def build_mlx_argv(audio_path: Path, model: str, language: str, output_dir: Path) -> list[str]:
+    """argv for mlx-whisper, run through uvx so nothing has to be installed.
+
+    Two incompatibilities with the reference CLI, both silent if got wrong:
+    flags are hyphenated (--output-format, not --output_format), and
+    --language has no "auto" choice — auto-detection means omitting the flag,
+    so passing our "auto" default through would be an argparse error.
+    """
+    cmd = [
+        "uvx", "--from", "mlx-whisper", "mlx_whisper",
+        str(audio_path),
+        "--model", mlx_model_repo(model),
+        "--output-format", "json",
+        "--output-dir", str(output_dir),
+        "--output-name", audio_path.stem,
+        "--verbose", "False",
+    ]
+
+    if language and language != "auto":
+        cmd.extend(["--language", language])
+
+    return cmd
+
+
+def transcribe_with_whisper(audio_path: Path, model: str, language: str,
+                            output_dir: Path, backend: str = "whisper") -> tuple[str, str]:
+    """Transcribe audio with Whisper, via the reference CLI or mlx-whisper.
+
+    Both backends write the same JSON schema, so the segment formatting below
+    is shared rather than duplicated per backend.
+    """
+    if backend not in BACKENDS:
+        raise ValueError(f"Unknown backend {backend!r}; expected one of {', '.join(BACKENDS)}")
+
+    if backend == "mlx":
+        if not shutil.which("uvx"):
+            raise RuntimeError(
+                "--backend mlx needs uvx (https://docs.astral.sh/uv/) on PATH. "
+                "Refusing to fall back to a smaller model: a quieter transcript "
+                "of a figures-dense source is worse than no transcript."
+            )
+        cmd = build_mlx_argv(audio_path, model, language, output_dir)
+    else:
+        cmd = build_whisper_argv(audio_path, model, language, output_dir)
+
+    print(f"Transcribing with Whisper (backend={backend}, model={model}, "
+          f"language={language})...", file=sys.stderr)
+
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:
-        raise RuntimeError(f"Whisper failed: {result.stderr}")
+        raise RuntimeError(f"Whisper failed ({backend}): {result.stderr}")
 
     # Find the output JSON file
     json_file = output_dir / f"{audio_path.stem}.json"
@@ -182,6 +249,11 @@ def transcribe_with_whisper(audio_path: Path, model: str, language: str, output_
     with open(json_file) as f:
         whisper_data = json.load(f)
 
+    return format_segments(whisper_data)
+
+
+def format_segments(whisper_data: dict) -> tuple[str, str]:
+    """Render Whisper segments as timestamped lines; return (transcript, language)."""
     # Convert Whisper format to our transcript format (with timestamps)
     transcript_lines = []
     for segment in whisper_data.get("segments", []):
@@ -282,13 +354,20 @@ def extract_chapters(description: str) -> list:
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Transcribe YouTube video using Whisper')
-    parser.add_argument('video', help='YouTube video URL or ID')
+    parser = argparse.ArgumentParser(
+        description='Transcribe any yt-dlp-supported video using Whisper')
+    parser.add_argument('video',
+                       help='Video URL (YouTube, x.com, Vimeo, …) or a bare YouTube ID')
     parser.add_argument('--model', default='medium',
-                       help='Whisper model (tiny, base, small, medium, large)')
+                       help='Whisper model (tiny, base, small, medium, large, large-v3-turbo)')
+    parser.add_argument('--backend', default='whisper', choices=list(BACKENDS),
+                       help='whisper = reference CLI; mlx = mlx-whisper via uvx (Apple Silicon)')
     parser.add_argument('--language', default='auto',
                        help='Language code (e.g., en, hi, es) or "auto" for detection')
     parser.add_argument('--output', '-o', help='Output JSON file path')
+    parser.add_argument('--audio',
+                       help='Transcribe this local audio file instead of downloading. '
+                            'Metadata is still read from the URL.')
     parser.add_argument('--keep-audio', action='store_true',
                        help='Keep the downloaded audio file')
     parser.add_argument('--cookies',
@@ -297,8 +376,9 @@ def main():
     args = parser.parse_args()
 
     try:
-        video_id = extract_video_id(args.video)
-        print(f"Video ID: {video_id}", file=sys.stderr)
+        kind, url = resolve_source(args.video)
+        ident = source_ident(kind, url)
+        print(f"Source: {ident} ({kind}) -> {url}", file=sys.stderr)
 
         # Create temp directory for working files
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -306,19 +386,26 @@ def main():
 
             # Get metadata first
             print("Fetching video metadata...", file=sys.stderr)
-            metadata = get_video_metadata(video_id)
+            metadata = get_video_metadata(url)
 
             if metadata:
                 print(f"Title: {metadata.get('title')}", file=sys.stderr)
                 print(f"Channel: {metadata.get('channel')}", file=sys.stderr)
                 print(f"Duration: {metadata.get('duration')}", file=sys.stderr)
 
-            # Download audio
-            audio_file = download_audio(video_id, temp_path, args.cookies)
+            # Download audio, unless a local file was supplied. Re-transcribing
+            # a long source with a different model should not re-download it.
+            if args.audio:
+                audio_file = Path(args.audio)
+                if not audio_file.exists():
+                    raise FileNotFoundError(f"--audio file not found: {audio_file}")
+                print(f"Using local audio: {audio_file}", file=sys.stderr)
+            else:
+                audio_file = download_audio(url, temp_path, args.cookies)
 
             # Transcribe
             transcript, detected_lang = transcribe_with_whisper(
-                audio_file, args.model, args.language, temp_path
+                audio_file, args.model, args.language, temp_path, args.backend
             )
 
             # Extract chapters from description
@@ -327,21 +414,23 @@ def main():
             # Build result
             result = {
                 **metadata,
-                'url': f"https://www.youtube.com/watch?v={video_id}",
-                'video_id': video_id,
+                'url': url,
+                'video_id': ident,
+                'source_kind': kind,
                 'language': detected_lang,
                 'transcript': transcript,
                 'chapters': chapters,
                 'speakers': [],
-                'transcription_method': 'whisper',
+                'transcription_method': f'whisper:{args.backend}',
                 'whisper_model': args.model,
+                'whisper_backend': args.backend,
             }
 
             # Determine output path
             if args.output:
                 output_path = Path(args.output)
             else:
-                output_path = Path(tempfile.gettempdir()) / f"yt_transcript_{video_id}.json"
+                output_path = Path(tempfile.gettempdir()) / f"yt_transcript_{ident}.json"
 
             # Write result
             with open(output_path, 'w', encoding='utf-8') as f:
@@ -352,7 +441,7 @@ def main():
             # caller chaining on OUTPUT_FILE would write a note with no body.
             if not (result.get('transcript') or '').strip():
                 print(f"ERROR: Whisper produced an empty transcript for "
-                      f"{video_id}. Metadata was written to {output_path}, but "
+                      f"{ident}. Metadata was written to {output_path}, but "
                       f"no OUTPUT_FILE marker is emitted.", file=sys.stderr)
                 sys.exit(3)
 
@@ -360,8 +449,8 @@ def main():
             # contract: final stdout line is machine-parseable
             print(f"OUTPUT_FILE:{output_path}")
 
-            # Optionally keep audio
-            if args.keep_audio:
+            # Optionally keep audio (a caller-supplied file is already durable)
+            if args.keep_audio and not args.audio:
                 final_audio = Path(tempfile.gettempdir()) / audio_file.name
                 audio_file.rename(final_audio)
                 print(f"Audio saved: {final_audio}", file=sys.stderr)
