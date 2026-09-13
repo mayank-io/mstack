@@ -27,6 +27,57 @@ views: {{views}}
 
 Add `x-thread` to `tags` for a multi-post thread, `x-article` for long-form. Omit a metric entirely rather than writing `0` when it could not be read — a real zero and an unread value are different facts.
 
+### Video posts
+
+`fetch:x-post` writes `media_type`, `video_duration`, `video_seconds` and `transcript: pending`. Replace `pending` once the transcript is in the note, and add the attestation keys:
+
+```yaml
+media_type: video
+video_duration: {{h:mm:ss}}
+video_seconds: {{n}}
+transcript: full
+transcript_method: {{backend}}/{{model}}        # e.g. mlx-whisper/large-v3-turbo
+transcript_words: {{n}}
+reading_status: to-read
+read_context: inflight | desk
+read_minutes: {{n}}
+```
+
+`read_context: inflight` is a promise the note reads with **no network**, which a video post can only keep if the full transcript is archived in it.
+
+A re-upload carries two more, because X shows the poster and not the author:
+
+```yaml
+content_author: "@{{original handle}}"
+original_post: {{original status url}}
+```
+
+## Body — order
+
+**Fixed, and not a stylistic preference:** summary, then the source verbatim, then your analysis. `notes:clip` Step 2.6 has the reasoning — the source is the part that cannot be regenerated once the post is gone, and analysis placed above it lets a thin capture read as a thorough one.
+
+```markdown
+# {{handle}}: {{title}}
+
+> **@{{handle}}** · {{likes}} likes · {{reposts}} reposts · {{views}} views
+> Posted [[{{post_date}}]] · captured [[{{today}}]]
+
+## Summary
+
+[What the post says, in your paraphrase. Key claims, figures, and takeaways.
+This is the source's content restated — not your evaluation of it.]
+
+## Post
+
+[the source, verbatim — see below]
+
+# Transcript          ← video posts only
+
+# Analysis
+```
+
+**Keep your own voice out of everything above `# Analysis`.** The summary paraphrases; it does not judge. Verification, doubts and scoring go below.
+
 ## Body — single post
 
 Post text verbatim, preserving line breaks. Then embedded images, then:
@@ -91,14 +142,45 @@ A well-sourced Article can carry 50+ external links. When there are more than ~1
 {{n}} external references: {{count}} {{domain}} · {{count}} {{domain}} · …
 ```
 
-## Required sections
+## Body — video post
 
-Both at the end, in this order:
+**A video post whose note contains only the caption is not a clip.** The caption is the hook; the video is the content. `fetch:x-post` Step 1.5 transcribes it.
+
+**A note without the `# Transcript` section populated is not an X clip.** If the transcript could not be obtained, say so under that heading and name the reason, rather than letting the summary stand in for it.
 
 ```markdown
-## Initial Take
+## Post
+
+{{caption verbatim}}
+
+---
+
+# Transcript
+
+*{{duration}} · transcribed with {{backend}} {{model}} · {{n}} segments · {{n}} words · verbatim, timestamps preserved.*
+
+0:00 First segment...
+0:11 Second segment...
+```
+
+The attestation line is not decoration. It is what lets a later reader tell a `large-v3-turbo` transcript from a `tiny` one, and it must name any departure from a single straight run — a re-transcribed window, a spliced boundary, a backend switched mid-way.
+
+**Check for a decoder repetition loop before the transcript goes in.** Whisper can catch a phrase and emit it for the rest of the file; the result still runs the full duration and still reads as English, so length and coverage checks both pass while the content is gone. `whisper_transcriber.py` warns on stderr and records `repetition_warnings` in its JSON — that list must be empty.
+
+## Required sections
+
+Both at the end, in this order, and **below** the transcript on a video post:
+
+```markdown
+# Analysis
+
+*Everything below this line is mine, not the source's.*
 
 - 2–4 bullets: the key claim, what is notable, what is unsupported.
+
+## Verification
+
+[Claims recomputed from source data. State what replicated and what did not.]
 
 ## Related
 
@@ -106,9 +188,12 @@ Both at the end, in this order:
 - [[@Person]] for each person with a note
 ```
 
+`# Analysis` replaces the older `## Initial Take`. It is an `h1` because it is a peer of `# Transcript`, not a subsection of the source — the heading level is what makes the boundary between the source and your voice visible in the outline.
+
 ## Rules
 
 - **Images at original resolution.** `fetch:x-post` requests `name=orig`; embed those. A downscaled chart is unreadable at the point it matters.
 - **Tickers as wikilinks** — `[[$AAPL]]`, never bare `$AAPL`. `notes:create` applies the vault's convention; do not fight it.
 - **Filename:** `@{{handle}} - {{short description}}.md`. Never include the status ID.
+- **Credit the author, not the poster.** X shows who posted. A natively re-uploaded video is attributed to the re-uploader by the page itself and by every metric on it; only `yt-dlp -J` (an `id` that differs from the status id, a `t.co` resolving to another account's status of identical duration) exposes the original. Record both: `author` is who posted, `content_author` is whose work it is.
 - **Quote what was said, flag what was not.** If replies ask something the author never answered, record that as a gap in the source rather than inferring an answer.
