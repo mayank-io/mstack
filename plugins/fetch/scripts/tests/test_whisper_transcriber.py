@@ -240,3 +240,29 @@ def test_conditioning_is_on_by_default(tmp_path):
     # default, so the flag must be absent unless asked for.
     assert "--condition-on-previous-text" not in wt.build_mlx_argv(
         tmp_path / "a.mp3", "medium", "auto", tmp_path)
+
+
+def test_a_loop_spread_across_short_segments_is_detected():
+    # The shape the per-line check missed: 24 segments each reading "So this is
+    # a good question." Every line is unremarkable prose and far too short to
+    # measure 4-gram repetition on, so only a cross-segment check sees it. This
+    # was found in a transcript that had already passed the per-line check.
+    looped = "\n".join(f"21:{50 + i} So this is a good question." for i in range(6))
+    suspects = wt.detect_repetition_loops(looped)
+    assert len(suspects) == 1
+    assert suspects[0]["kind"] == "repeated-segment"
+    assert suspects[0]["segments"] == 6
+
+
+def test_a_phrase_repeated_twice_is_speech_not_a_loop():
+    # "Right. Right." happens. Three or more identical consecutive segments is
+    # where it stops being plausible.
+    assert wt.detect_repetition_loops("0:01 Right.\n0:02 Right.") == []
+
+
+def test_both_loop_shapes_are_reported_together():
+    mixed = ("0:01 Fine prose here that runs on for a while and says something real.\n"
+             "0:05 Same line.\n0:06 Same line.\n0:07 Same line.\n"
+             "0:10 " + "the crash of 1929, " * 30)
+    kinds = {s["kind"] for s in wt.detect_repetition_loops(mixed)}
+    assert kinds == {"repeated-segment", "within-segment"}

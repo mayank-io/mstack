@@ -166,11 +166,20 @@ def detect_repetition_loops(transcript: str, threshold: float = 0.6) -> list[dic
     coverage check passes while the content is gone. One 53-minute lecture lost
     its last 11 minutes this way and looked complete.
 
-    Measures the fraction of repeated 4-grams per line. Natural speech repeats
-    some; a loop repeats almost everything.
+    A loop takes two shapes and BOTH must be checked:
+
+    1. Within one segment — "the crash of 1929" forty times in a single line.
+       Measured as the fraction of repeated 4-grams.
+    2. Across consecutive segments — "So this is a good question." emitted as
+       24 separate short lines. Each line on its own is unremarkable prose and
+       is far too short to measure 4-gram repetition on, so shape 1 misses it
+       entirely. This was found the hard way: a transcript passed the per-line
+       check and still had 24 duplicate segments in the middle of it.
     """
+    lines = transcript.splitlines()
     suspects = []
-    for line in transcript.splitlines():
+
+    for line in lines:
         timestamp, _, text = line.partition(" ")
         words = text.split()
         if len(words) < 12:
@@ -179,7 +188,26 @@ def detect_repetition_loops(transcript: str, threshold: float = 0.6) -> list[dic
         repeated = 1 - len(set(grams)) / len(grams)
         if repeated > threshold:
             suspects.append({"timestamp": timestamp, "repeated_fraction": round(repeated, 3),
-                             "text": text[:120]})
+                             "text": text[:120], "kind": "within-segment"})
+
+    def norm(line):
+        return re.sub(r"[^a-z0-9 ]", "", line.partition(" ")[2].lower()).strip()
+
+    run_start, run_len = 0, 1
+    for i in range(1, len(lines) + 1):
+        same = (i < len(lines) and norm(lines[i]) and norm(lines[i]) == norm(lines[i - 1]))
+        if same:
+            run_len += 1
+            continue
+        if run_len >= 3:
+            head = lines[run_start]
+            suspects.append({"timestamp": head.partition(" ")[0], "repeated_fraction": 1.0,
+                             "text": head.partition(" ")[2][:120],
+                             "kind": "repeated-segment", "segments": run_len})
+        run_start, run_len = i, 1
+
+    suspects.sort(key=lambda s: lines.index(next(
+        l for l in lines if l.startswith(s["timestamp"]))))
     return suspects
 
 
