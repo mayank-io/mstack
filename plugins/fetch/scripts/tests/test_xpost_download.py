@@ -34,11 +34,11 @@ class Spy(_browse.BrowsePage):
     """Captures the expression instead of shelling out to $B."""
 
     def __init__(self, reply="null"):
-        self.sent = None
+        self.sent = ""      # the expression, never None — assertions call str methods on it
         self.reply = reply
 
-    def _run(self, *args, **kwargs):
-        self.sent = args[1] if len(args) > 1 else None
+    def _run(self, *args, **_kwargs):
+        self.sent = args[1] if len(args) > 1 else ""
         return self.reply
 
 
