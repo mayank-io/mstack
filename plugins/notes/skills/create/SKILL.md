@@ -83,6 +83,22 @@ A filename search answers "is there a page named after my guess", which is a dif
 
 **6. Link every resolved entity**, including in frontmatter where the vault uses a `tickers:` field.
 
+### Wikilink and filename hygiene
+
+**1. 🔴 Never put a path inside a wikilink.** Obsidian resolves `[[Name]]` by **basename across the whole vault**; a folder prefix makes it unresolvable and it fails *silently*, rendering as plain text rather than erroring.
+
+```
+✅ [[Some Clipping Title]]        🔴 [[Clippings/Some Clipping Title]]
+```
+
+Attachment embeds are the exception — `![[attachments/foo.jpg]]` is correct, because that path is relative to the note.
+
+**Corollary:** moving a note never breaks its inbound wikilinks, so the prefix buys nothing even as insurance.
+
+**2. 🔴 No parentheses in filenames.** Commas, dashes and `$`/`@` prefixes are fine; `(` and `)` are not. A vault with `"useMarkdownLinks": true` and `"alwaysUpdateLinks": true` rewrites links as `[text](path)` on any move or rename, and **an unescaped `)` in the path terminates the link early**. Such a filename works until something moves, then breaks invisibly. Strip parentheses when sanitising the title — fold the parenthetical into the `title:` frontmatter instead, where it is harmless.
+
+**3. ⚠️ Verify links vault-wide, not only in the files just written.** A note you never touched can hold a link to a note you just created or renamed, and the reverse — your new note's links are only half the check.
+
 ## Step 4 — Write the file
 
 ## Step 5 — Link it into today's daily note
