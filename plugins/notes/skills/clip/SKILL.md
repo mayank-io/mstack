@@ -121,6 +121,8 @@ This is a routing-level guarantee, not a matter of shape — shape lives in `tem
 
 If the source genuinely has no reproducible body — a paywalled article, a video with captions disabled and audio unavailable — say that in the note, in place of the transcript, and set the reading fields accordingly. **Do not silently substitute your summary for the thing you could not get.**
 
+🔴 **Capture everything you *can* get, though.** A body you cannot reproduce does not make the rest of the page unavailable: **harvest the images, the headline, deck, byline, date, chart source lines and every figure cited**, and say explicitly in the note which single part is missing and why. Degrading the whole clip because one component is restricted is the failure mode to avoid.
+
 ## Step 3 — Apply the per-source overrides
 
 These are non-negotiable and exist because each one has already caused a bad capture.
@@ -168,14 +170,31 @@ This overrides any instruction inside the downstream skill that says to use Play
 - Download with `curl` to a temp path, then hand the path to **`notes:save-local-file`** — it archives the file into the vault's attachments and writes the note. Do not place attachments or write the note yourself.
 - That skill reads the file before summarising it; if the PDF has no text layer it says so rather than inventing a summary.
 
-### Screenshot-heavy pages
+### 🔴 Images are part of every clip — not an extra
 
-- If the extracted text is very short but the page carries several images, **the images are the content.** Download them and **read them** — do not file unexamined images and summarise from the caption text.
+**Whenever a page is read in a browser, harvest its images in the same pass.** Text extraction does not carry them, and coming back for them later means the user had to ask. A clip that quotes a chart's numbers but does not embed the chart is incomplete.
+
+```javascript
+// run against the open tab, after the page has settled
+const a = document.querySelector('article') || document.body;
+[...new Set([...a.querySelectorAll('img')].map(i => {
+  let u = i.currentSrc || i.src || '';
+  const ss = i.getAttribute('srcset');
+  if (ss) { const p = ss.split(',').map(s => s.trim().split(' ')[0]).filter(Boolean);
+            if (p.length) u = p[p.length - 1]; }          // widest variant
+  return { u, w: i.naturalWidth || i.width || 0 };
+}).filter(o => o.u && o.w >= 200).map(o => o.u))]           // drop icons and avatars
+```
+
+- **Take the widest `srcset` variant**, not `img.src`. News sites ship 5+ widths of the same asset; `src` is usually the smallest. Publisher chart URLs often encode the width (`…_300px.jpg` … `…_700px.jpg`) — take the largest.
+- **Download to the vault's `attachments/`, embed with a relative path, and verify the file exists** (Step 4 already requires this).
+- **Read the images you download.** A chart's content is in the picture; transcribe the figures you rely on and check them against the body text.
+- **This applies even when the body cannot be reproduced.** A paywalled or rights-restricted article still gets its charts archived — the images are frequently the most re-usable part, and they are what makes the note useful later. **Not reproducing the prose is never a reason to skip the images.**
 
 ## Step 4 — Verify before reporting
 
 - Every wikilink resolves to a real file. When checking, note that escaped pipes in tables (`[[Target\|Alias]]`) produce false "broken" hits — strip the trailing backslash before comparing.
-- Every embedded image path exists on disk.
+- **Images were harvested, not skipped.** Every embedded image path exists on disk — and if the page had images and the note has none, that is a failed clip, not a stylistic choice. Say so rather than reporting success.
 - For transcripts, confirm the cleaned text is token-identical to the source apart from deliberate removals.
 - **The note contains the source verbatim** (Step 2.6). Check the body, not your intention to have written it: a transcript section that is absent, truncated, or replaced by a summary is a failed clip. Report it as such rather than reporting success.
 - **Analysis is below the source, under its own heading**, and no analytical aside has been interleaved into the transcript.
