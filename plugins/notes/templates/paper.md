@@ -56,6 +56,6 @@ date_captured: {{today}}
 
 ## Rules
 
-- **Filename:** `{{first author}} et al - {{short title}}.md`.
+- **Filename:** `Whitepaper - {{short title}}.md`. No author in the filename; authors live in frontmatter and the byline. Applies to every paper route (arXiv, PubMed, PDF papers).
 - Keep the abstract verbatim; do not paraphrase it into the summary.
 - If the paper is only reachable as a PDF, route to `notes:save-local-file` instead so the PDF is archived.
