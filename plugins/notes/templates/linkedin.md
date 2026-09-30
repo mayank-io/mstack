@@ -44,7 +44,13 @@ LinkedIn shows a relative age ("2w"), not a date. Resolve it where you can; **wh
 **Engagement:** {{likes}} likes · {{comments}} comments · {{reposts}} reposts
 **Posted:** [[{{post_date}}]]
 **Source:** [LinkedIn]({{url}})
+
+### Notable comments
+
+- **{{commenter}}** ({{commenter headline, short}}): "{{comment text, verbatim}}"
 ```
+
+**`### Notable comments` is optional but usually worth it on list and advice posts** — commenters routinely add the items the author missed. Quote verbatim and keep the commenter's name; drop reactions-only replies ("Saving to dive in"), tags of other users, and self-promotion. Omit the section when no comment adds substance.
 
 ## Required sections
 

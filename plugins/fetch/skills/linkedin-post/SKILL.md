@@ -35,6 +35,8 @@ restart when it is wrong:
 The `_browse.py` adapter runs this check inside `connect()` and refuses to continue
 if it cannot reach `headed`. Do the same by hand when driving `$B` directly.
 
+**Run `$B` outside the command sandbox.** Claude Code's Bash sandbox blocks the connection to the daemon, and `$B status` then reports `Headed server running (PID …) but not responding` — which reads as a hung daemon but is not one. Verified 2026-09-30: the same PID reported `healthy, headed` when the identical command ran unsandboxed, before and after. **Before force-restarting a "not responding" daemon, re-run `status` unsandboxed.**
+
 **Do NOT `disconnect` when done.** `browse disconnect` tears down the daemon and
 the logged-in sessions with it. Leave it running — the daemon is a shared user
 resource, `connect` is safe to call again, and only whoever started it should
@@ -73,7 +75,7 @@ The control is **not always present**, and where it appears depends on the surfa
 | Surface | "…more" present? |
 |---|---|
 | A company or member **posts listing** — `linkedin.com/company/<name>/posts/` | **Yes**, on every post whose text overflows |
-| A **post permalink** — `linkedin.com/posts/<slug>-<id>` | **Often not.** The permalink frequently renders the truncated public variant with no expander at all. |
+| A **post permalink** — `linkedin.com/posts/<slug>-<id>` | **Sometimes.** The permalink can render the truncated public variant with no expander at all (2026-08-24), or the full signed-in view with a working "… more" (2026-09-30: 5 clicks over 2 rounds, full 30-item body). **Always run the expand loop first**; fall back only when it clicks nothing. |
 
 **So try the listing surface when the permalink is short.** If a permalink yields a body under ~250 characters with no expander, the same post on its author's `/posts/` listing usually carries the full text plus a working "…more".
 
@@ -160,6 +162,34 @@ Unlike Twitter's snowflake this needs **no epoch offset** — `id >> 22` is epoc
 
 **Return `links` — do not follow them.** Recursing into shared content is `notes:clip`'s job; a fetch skill that pulls in a YouTube video has stopped being a fetch skill. Capture the preview card's title, description and image too: it is often the only trace left when the target link rots.
 
+**Clean `links` before returning them — a raw anchor harvest is mostly noise.** Three traps, all seen on one post (2026-09-30):
+
+- **Every external link is wrapped** as `linkedin.com/safety/go/?url=<encoded target>&urlhash=…`. Unwrap to the `url` parameter; the wrapper is not the link.
+- **LinkedIn auto-links bare filenames as domains.** A post that says "CLAUDE.md" and "SKILL.md" produced `safety/go/?url=http://CLAUDE.md` and `http://SKILL.md`. Drop any target whose "host" ends in a file extension (`.md`, `.json`, `.py`, `.txt`, …) — there is nothing there to follow.
+- **Scope to the post card, and drop the author's "Visit my website" button.** `document.querySelectorAll('a')` also collects comment links, navigation and the footer. Class selectors (`.feed-shared-update-v2`, `[class*="comments-"]`) match **nothing** on the obfuscated DOM and silently fall back to the whole page. The stable anchor is the visually hidden `<h2>Feed post</h2>` heading: its `[role="listitem"]` ancestor (`componentkey="update-card-focus…"`) holds the header, body, attachment and metrics — **and not the comments**, which sit in a sibling container.
+
+```javascript
+() => {
+  const h = [...document.querySelectorAll('h2')].find(e => (e.innerText || '').trim() === 'Feed post');
+  const post = (h && h.closest('[role="listitem"]')) || document.querySelector('[componentkey^="update-card-"]');
+  if (!post) return {error: 'post card not found'};         // never fall back to document.body
+  const out = new Set();
+  post.querySelectorAll('a[href]').forEach(a => {
+    if (/^visit my website$/i.test((a.innerText || '').trim())) return;   // author header button
+    let u = a.href;
+    try { const p = new URL(u); if (p.pathname.startsWith('/safety/go')) u = p.searchParams.get('url') || ''; } catch { return; }
+    if (!u || /linkedin\.com\//.test(u)) return;                         // profiles, hashtags, self
+    try { if (/\.(md|json|ya?ml|py|js|ts|txt|sh)$/i.test(new URL(u).hostname)) return; } catch { return; }
+    out.add(u);
+  });
+  return {links: [...out]};
+}
+```
+
+**Verified 2026-09-30** on a post that shares nothing: the class-selector version missed the card and returned 17 URLs (nav, premium upsell, footer, author website, two example URLs from a comment). This version returns `[]` — and with the "Visit my website" line removed it returns the unwrapped `https://skool.com/tec/about`, which proves the unwrap path works and the empty result is not a dead selector. The card's text was 2,197 characters against 7,950 for card + comments.
+
+Check the result against the body text: every link returned should correspond to something the post visibly shares. An empty result is correct for a post that shares nothing.
+
 ⚠️ Page JavaScript stays synchronous — see the browser section above. `fetch:blog-post` Step 3 shows the Python-driven loop shape.
 
 ## Step 3 — Download the attachments
@@ -206,7 +236,7 @@ LinkedIn encodes the rendition in the path — `image-shrink_800` is a downscale
   .map(i => ({src: i.currentSrc || i.src, srcset: i.srcset || '', w: i.naturalWidth, h: i.naturalHeight}))
 ```
 
-Take the largest candidate `srcset` offers. Only if there is none, try the path rewrite — it may still work on unsigned `image-shrink_` URLs — and fall back:
+Take the largest candidate `srcset` offers. **On a width tie, prefer `feedshare-image-high-res`** — verified 2026-09-30, `srcset` listed both `feedshare-image-high-res` and `feedshare-shrink_1280` as `1024w`; the high-res variant downloaded at 1024×1280. Only if there is none, try the path rewrite — it may still work on unsigned `image-shrink_` URLs — and fall back:
 
 ```bash
 big="${url/image-shrink_800/image-shrink_1280}"

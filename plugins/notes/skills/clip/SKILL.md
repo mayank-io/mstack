@@ -32,10 +32,12 @@ The fallback goes to **`fetch:blog-post`**, not `obsidian:defuddle`. `blog-post`
 
 **Every route is the same six steps.** There is no per-source skill, and there should never be one — what varies between sources is output shape, and shape lives in `templates/`.
 
+**Templates live at the plugin root — `${CLAUDE_PLUGIN_ROOT}/templates/` — not beside this skill.** There is no `skills/clip/templates/`; a path resolved relative to this file finds nothing.
+
 ```
 1. route on host        ──▶  fetch:<source>          (curl, for PDF)
 2. read its OUTPUT_FILE: / OUTPUT_DIR: final line     — Step 2
-3. select templates/<source>.md, and templates/channels/<name>.md if one matches
+3. select ${CLAUDE_PLUGIN_ROOT}/templates/<source>.md, and …/templates/channels/<name>.md if one matches
 4. if the content is a transcript  ──▶  notes:clean-transcript
 5. fill the template
 6. notes:create                     (or notes:save-local-file, for PDF)
@@ -136,6 +138,8 @@ B="$HOME/.claude/skills/gstack/browse/dist/browse"
 "$B" connect          # run from the vault directory — a different cwd spawns a second daemon and kills the headed session
 "$B" goto "<url>"
 ```
+
+**Run `$B` outside the command sandbox.** Inside it, `$B status` reports `Headed server running (PID …) but not responding` for a daemon that is healthy — the sandbox blocks the connection, not the daemon. Re-run `status` unsandboxed before force-restarting anything.
 
 **Do NOT `disconnect` when done.** `browse disconnect` tears down the daemon and
 the logged-in sessions with it. Leave it running — the daemon is a shared user

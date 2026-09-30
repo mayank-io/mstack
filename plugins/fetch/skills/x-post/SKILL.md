@@ -31,6 +31,8 @@ B="$HOME/.claude/skills/gstack/browse/dist/browse"
 
 The `_browse.py` adapter runs this check inside `connect()` and refuses to continue if it cannot reach `headed`. Both entry points below go through it, so the check is automatic; do the same by hand when driving `$B` directly.
 
+**Run `$B` outside the command sandbox.** Claude Code's Bash sandbox blocks the connection to the daemon, and `$B status` then reports `Headed server running (PID …) but not responding` — which reads as a hung daemon but is not one. Verified 2026-09-30: the same PID reported `healthy, headed` when the identical command ran unsandboxed, before and after. **Before force-restarting a "not responding" daemon, re-run `status` unsandboxed.** Restarting a healthy headed daemon costs nothing in logins, but it hides the real cause and every later `$B` call fails the same way.
+
 **Do NOT `disconnect` when done.** `browse disconnect` tears down the daemon and the logged-in sessions with it. Leave it running — the daemon is a shared user resource, `connect` is safe to call again, and only whoever started it should close it. The adapter's `close()` is deliberately a no-op, so leaving the `browse_page()` block tears down nothing.
 
 **Never launch a headless browser.** Not `headless=True`, not `--headless`, not a fresh `chromium.launch()`. If gstack is unavailable, stop and say so rather than falling back — a logged-out capture is worse than no capture, because it looks fine.
