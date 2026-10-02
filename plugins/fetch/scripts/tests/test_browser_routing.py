@@ -39,6 +39,10 @@ ROUTED = [
     # that renders as a short post, so an empty thread capture reads as a real
     # single-post capture.
     "xpost_download.py",
+    # Added 2026-10-02 with LinkedIn article support. LinkedIn serves a
+    # logged-out Pulse page that still renders the title and first paragraphs,
+    # so a fresh browser would capture a truncated article that looks complete.
+    "linkedin_article_download.py",
 ]
 
 # Scripts that RECEIVE a page rather than opening one. They must never acquire a

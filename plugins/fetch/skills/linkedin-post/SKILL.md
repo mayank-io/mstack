@@ -1,11 +1,20 @@
 ---
 name: linkedin-post
-description: "Extract a LinkedIn post — author, headline, full text, engagement metrics, images, and any URLs it shares — using the gstack browser. Use when the user says \"read this linkedin post\", \"get this linkedin post\", \"extract this linkedin post\", or shares a linkedin.com/posts or linkedin.com/feed/update URL. Returns content and images to a directory; it does not write notes."
+description: "Extract a LinkedIn post or article — author, headline, full text, engagement metrics, images, and any URLs it shares — using the gstack browser. Use when the user says \"read this linkedin post\", \"get this linkedin post\", \"extract this linkedin post\", \"get this linkedin article\", or shares a linkedin.com/posts, linkedin.com/feed/update or linkedin.com/pulse URL. Returns content and images to a directory; it does not write notes."
 ---
 
 # Fetch LinkedIn Post
 
-Pull a LinkedIn post's content and media into a directory. **This skill knows nothing about vaults** — it retrieves, and stops. `notes:clip` turns the result into a note.
+Pull a LinkedIn post's or article's content and media into a directory. **This skill knows nothing about vaults** — it retrieves, and stops. `notes:clip` turns the result into a note.
+
+## Route first: article or post
+
+| URL | Mode | Run |
+|---|---|---|
+| `linkedin.com/pulse/<slug>` | **Article** | [Article mode](#article-mode--linkedincompulse) — one script, then stop. Skip Steps 1–4. |
+| `linkedin.com/posts/…`, `linkedin.com/feed/update/…` | **Post** | Steps 1–4 below |
+
+**Never run post-mode steps on an article.** Each one fails silently there: the "Feed post" scoping heading does not exist, there is no "…more" expander, the slug carries no activity id to decode a date from (`-6vsuc` is not one), and the post-mode image filter rejects `article-cover_image` and does not know `article-inline_image`, so every image in the body is dropped.
 
 ## Browser — always gstack, never headless
 
@@ -57,7 +66,7 @@ containing a quote breaks the expression.
 
 `$ARGUMENTS`:
 
-- **First argument** — LinkedIn post URL (required): `linkedin.com/posts/…` or `linkedin.com/feed/update/…`
+- **First argument** — LinkedIn URL (required): a post (`linkedin.com/posts/…`, `linkedin.com/feed/update/…`) or an article (`linkedin.com/pulse/…`)
 - **Second argument** — output directory (optional). Omitted, a temp directory is used. Created if missing. **Never write outside it.**
 
 ## Step 1 — Navigate and expand
@@ -271,6 +280,42 @@ OUTPUT_DIR:/absolute/path/to/output
 ```
 
 The marker must be last. Callers chain on it and must never reconstruct the path.
+
+## Article mode — `linkedin.com/pulse/…`
+
+**This skill owns no article extraction code.** The DOM logic is [`references/article_extraction.js`](references/article_extraction.js), tested under jsdom against a saved copy of a live article; navigation, waiting, validation and downloading are `${CLAUDE_PLUGIN_ROOT}/scripts/linkedin_article_download.py`. Do not re-implement either by hand — run the script:
+
+```bash
+python3 ${CLAUDE_PLUGIN_ROOT}/scripts/linkedin_article_download.py "<pulse-url>" [out_dir]
+```
+
+Run it via the Bash tool **outside the sandbox** (it drives `$B`) with `timeout: 300000`. It goes through `_browse.sync_browse_page()`, so the headed-mode check is automatic.
+
+What it writes into `out_dir` (a temp directory when omitted):
+
+| File | Contents |
+|---|---|
+| `article.json` | `type: article`, `source`, `title`, `author_name`, `author_headline`, `author_url`, `published_label`, `published` (ISO, or null), `earliest_image_upload_utc`, `date_warning`, `metrics {reactions, comments, reposts}`, `links`, `body_chars`, ordered `blocks`, `images [{url, role, file}]`, `images_failed` |
+| `article.md` | plain Markdown of the article in document order, no vault syntax |
+| `linkedin-<slug>-cover.jpg`, `linkedin-<slug>-<n>.jpg` | the cover and every inline image, at the widest `srcset` rendition |
+
+**Output contract:** final stdout line `OUTPUT_DIR:<abs path>`. On failure — a non-article URL, no `<article>`, no title, or a body under 300 characters (a login wall or the wrong page) — it exits non-zero with **no** marker. Warnings go to stderr: a printed date more than 2 days from the earliest image upload, or an image that failed to download.
+
+How each article difference is handled, so it is not rediscovered:
+
+| Difference from a post | Handled in |
+|---|---|
+| Body is **ordered blocks** (paragraphs, `##`/`###` headings, lists, quotes, code, images *between* paragraphs), not one string | `article_extraction.js blocksOf()` — the note must keep image positions |
+| Bold run-ins put the separating space **inside** `<strong>`, so naive wrapping fuses words (`**workflow:**Doubleclick`) | `inline()` moves edge whitespace outside the markers |
+| **No activity id** — the date is the printed `<time>` label, corroborated by the `/0/<epoch_ms>` upload stamp in the image URLs | `parse_published_label()`, `date_check()`; an unparseable label is `null`, never a guess |
+| Cover (`article-cover_image`) and inline (`article-inline_image`) images are **content** | `image_role()`; the cover is returned separately, never as a body block |
+| Inline images are **lazy** | the script scrolls to the end and polls `imagesPending()` before extracting |
+| Reactions render as a bare number; the unit is only in the **`aria-label`** ("37 reactions") | `metricsOf()` reads aria-labels in `.social-details-social-counts` |
+| External links are `safety/go` wrapped | `unwrapLink()`, scoped to the article body |
+
+Verified 2026-10-02 on `linkedin.com/pulse/defensibility-ai-data-lessons-from-ads-gokul-rajaram-6vsuc`: 17 blocks, 6,116 body characters word-for-word identical to a by-hand capture, cover 778×437 and inline image 972×734 between the closing paragraph and the PS, 37 reactions / 4 comments, printed date agreeing with the image upload at 2026-10-02 02:00 UTC.
+
+**Comments are not captured** in article mode; quote any you need from the page by hand.
 
 ## ⚠️ LinkedIn serves a truncated public view on post permalinks
 

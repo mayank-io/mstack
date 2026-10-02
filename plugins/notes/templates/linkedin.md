@@ -52,6 +52,51 @@ LinkedIn shows a relative age ("2w"), not a date. Resolve it where you can; **wh
 
 **`### Notable comments` is optional but usually worth it on list and advice posts** — commenters routinely add the items the author missed. Quote verbatim and keep the commenter's name; drop reactions-only replies ("Saving to dive in"), tags of other users, and self-promotion. Omit the section when no comment adds substance.
 
+## Article — `linkedin.com/pulse/…`
+
+`fetch:linkedin-post` returns `type: article` with ordered `blocks`. An article is an essay, not a post: swap `linkedin-post` for `linkedin-article` in `tags`, and use the printed `published` date as `date` (it is a real date, not a relative age; leave it empty when the fetcher returns `null`).
+
+```yaml
+tags:
+  - clippings
+  - linkedin-article
+  - inbox
+source: {{source}}
+author: "{{author_name}}"
+author_headline: "{{author_headline}}"
+author_url: {{author_url}}
+date: {{published}}
+date_captured: {{today}}
+likes: {{metrics.reactions}}
+comments: {{metrics.comments}}
+```
+
+```markdown
+# {{title}}
+
+> **{{author_name}}**, {{author_headline}} · LinkedIn article · {{reactions}} reactions · {{comments}} comments
+> Published [[{{published}}]] · captured [[{{today}}]]
+
+## Summary
+
+[paraphrase of the argument, no evaluation]
+
+## Article
+
+{{blocks, in document order — article.md minus its title and byline, every heading demoted one level}}
+
+---
+
+**Engagement:** {{reactions}} reactions · {{comments}} comments (at capture)
+**Published:** [[{{published}}]]
+```
+
+- **The title is the note's only `#`.** Article `h2` → `###`, `h3` → `####` under `## Article`, so the source's sections nest under it and never collide with `## Summary` or `# Analysis`.
+- **Images stay where the article put them.** An image block between two paragraphs is embedded between those paragraphs, not collected at the end. Embed the cover above the body only when it is not a crop of an inline image.
+- **Bold run-ins are the author's.** Keep `**label:**` from the blocks; do not add emphasis the source lacks.
+- **Filename:** `{{Author Name}} - {{title}}.md`, colons and parentheses folded into commas or dashes.
+- `# Analysis` replaces `## Initial Take` for articles, as in `x.md`: an `h1` after the source, so the boundary between the author's voice and yours is visible in the outline.
+
 ## Required sections
 
 ```markdown
