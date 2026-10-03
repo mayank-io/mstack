@@ -234,8 +234,14 @@ def verify(note_path):
         elif kind in ("data", "inline-svg"):
             problems.append({"embed": target, "problem": f"{kind} left in the note, not an attachment"})
         else:
-            path = (os.path.normpath(os.path.join(os.path.dirname(note_path), target))
-                    if kind == "path" else _resolve_wiki(target, note_path, root))
+            path = _resolve_wiki(target, note_path, root)
+            if kind == "path":
+                # Obsidian resolves a markdown embed like a wikilink: the exact
+                # relative path first, then the file's name anywhere in the
+                # vault. A check stricter than the app reports files as missing
+                # that the reader can see.
+                direct = os.path.normpath(os.path.join(os.path.dirname(note_path), target))
+                path = direct if os.path.exists(direct) or path is None else path
             if path is None:
                 problems.append({"embed": target, "problem": "missing"})
                 continue

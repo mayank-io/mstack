@@ -164,6 +164,21 @@ def test_wikilink_embed_resolves_by_basename_across_the_vault(vault):
     assert r["problems"] == [{"embed": "attachments/gone.jpg", "problem": "missing"}]   # .base and notes are not attachments
 
 
+def test_markdown_embed_falls_back_to_basename_like_obsidian_does(vault):
+    # the note says `deck.pdf`; the file lives in attachments/. Obsidian shows it.
+    (vault / "Clippings/attachments/deck.pdf").write_bytes(b"%PDF-1.4")
+    r = run(note(vault, "![](deck.pdf)\n![](nowhere.pdf)\n"), check_only=True)
+    assert r["local_ok"] == ["Clippings/attachments/deck.pdf"]
+    assert r["problems"] == [{"embed": "nowhere.pdf", "problem": "missing"}]
+
+
+def test_icloud_placeholder_still_detected_at_the_stated_path(vault):
+    (vault / "Clippings/attachments/.pic.png.icloud").write_bytes(b"x")
+    (vault / "Elsewhere").mkdir()
+    r = run(note(vault, "![x](attachments/pic.png)\n"), check_only=True)
+    assert r["problems"][0]["problem"] == "iCloud placeholder, not downloaded"
+
+
 def test_linked_local_files_are_checked_like_embeds(vault):
     (vault / "Clippings/attachments/supp 1.pdf").write_bytes(b"%PDF-1.4")
     body = ("[Additional file 1](attachments/supp%201.pdf)\n[Table](attachments/gone.xls)\n"
