@@ -255,16 +255,24 @@ def _bracket_citations(root) -> None:
     superscript and glues the digits to the preceding word. "presented in
     1983.13" is a real line from PMID 26041386 — the trailing 13 is reference
     13, but it reads as a decimal. Brackets keep the marker unambiguous.
+
+    Journals that set citations in brackets themselves (BMC: `[<xref>1</xref>-
+    <xref>4</xref>]`) must not be bracketed again: `[[1]-[4]]` is a wikilink to
+    a note called "1" in Obsidian, and PMID 18782426 produced 24 of them. An
+    xref that already sits inside an open `[` in its parent's own text is left
+    as the bare number.
     """
-    for xref in root.iter("xref"):
-        if xref.get("ref-type") != "bibr":
-            continue
-        inner = "".join(xref.itertext()).strip()
-        if not inner:
-            continue
-        for child in list(xref):
-            xref.remove(child)
-        xref.text = f"[{inner}]"
+    for parent in root.iter():
+        seen = parent.text or ""                 # the parent's own text so far
+        for child in list(parent):
+            if child.tag == "xref" and child.get("ref-type") == "bibr":
+                inner = "".join(child.itertext()).strip()
+                if inner:
+                    for grand in list(child):
+                        child.remove(grand)
+                    already_open = seen.count("[") > seen.count("]")
+                    child.text = inner if already_open else f"[{inner}]"
+            seen += child.tail or ""
 
 
 def _label(el) -> str:

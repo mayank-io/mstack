@@ -198,7 +198,14 @@ const a = document.querySelector('article') || document.body;
 ## Step 4 — Verify before reporting
 
 - Every wikilink resolves to a real file. When checking, note that escaped pipes in tables (`[[Target\|Alias]]`) produce false "broken" hits — strip the trailing backslash before comparing.
-- **Images were harvested, not skipped.** Every embedded image path exists on disk — and if the page had images and the note has none, that is a failed clip, not a stylistic choice. Say so rather than reporting success.
+- **Attachments are local, proven by the script.** Run this on every note the clip wrote or changed, **outside the command sandbox**, and read its exit code:
+
+  ```bash
+  python3 "${CLAUDE_PLUGIN_ROOT}/skills/clip/scripts/attachments.py" "<absolute path to the note>" --obsidian
+  ```
+
+  It downloads any remote image still embedded by URL, decodes `data:` images, saves inline `<svg>` as files, then checks that every embed exists, is not empty, is not an iCloud placeholder, and resolves in the running Obsidian app. **Exit 1 is a failed clip**: fix what `problems` and `failed` list, or report the clip as incomplete. `notes:create` runs the same script (its Step 4.5); run it again here if you edited the note afterwards. Report the result as a count, e.g. "24 of 24 attachments local". If `obsidian.status` is `skipped`, say so; a skip is not a pass.
+- **Images were harvested, not skipped.** The script proves the images the note embeds are present; it cannot know about images the note never embedded. If the page had images and the note has none, that is a failed clip, not a stylistic choice. Say so rather than reporting success.
 - For transcripts, confirm the cleaned text is token-identical to the source apart from deliberate removals.
 - **The note contains the source verbatim** (Step 2.6). Check the body, not your intention to have written it: a transcript section that is absent, truncated, or replaced by a summary is a failed clip. Report it as such rather than reporting success.
 - **Analysis is below the source, under its own heading**, and no analytical aside has been interleaved into the transcript.

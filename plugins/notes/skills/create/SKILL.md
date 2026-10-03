@@ -101,6 +101,37 @@ Attachment embeds are the exception — `![[attachments/foo.jpg]]` is correct, b
 
 ## Step 4 — Write the file
 
+## Step 4.5 — Make the attachments local. Always.
+
+**Run this on every note you write, immediately after writing it. It is not optional and it is not only for clippings.**
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/skills/clip/scripts/attachments.py" "<absolute path to the note>" --obsidian
+```
+
+Run it **outside the command sandbox**: `--obsidian` talks to the running Obsidian app, and the sandbox blocks that.
+
+What it does, in one pass:
+
+| In the note | Becomes |
+|---|---|
+| `![alt](https://…/image.png)`, a remote image | downloaded into `<note folder>/attachments/` and re-embedded by relative path |
+| `![alt](data:image/…;base64,…)` or `<img src="data:…">` | decoded into a file and re-embedded |
+| an inline `<svg>…</svg>` | saved as a valid `.svg` file and re-embedded |
+| a remote embed that is not an image (a YouTube player) | left alone, listed under `skipped` |
+
+Then it verifies **every** embed in the note, whoever wrote it: the file exists, is not empty, is not an iCloud placeholder, and (for SVG) parses. With `--obsidian` it also asks the app to resolve each embed, which is the only check that sees the note as the reader will.
+
+**Read the result.** stdout is one JSON object; the exit code is the verdict.
+
+- **Exit 0** — every embed is local and present. Report the count (`local_ok`) and move on.
+- **Exit 1** — something is missing, empty, a placeholder, or failed to download. `problems` and `failed` name each one. **Fix it or report the note as incomplete; never report the note as done.**
+- `obsidian.status: "skipped"` — the app or its CLI was not reachable. The file checks still ran; say that the Obsidian check was skipped and why. A skip is not a pass.
+
+Files are named `<note-name-slug>-NN.<ext>` by default; pass `--prefix` to match the source's naming (`karpathy-2105819303471976479`). Fenced code blocks are never rewritten. A second run changes nothing.
+
+**Why a script and not a checklist item:** "every embedded image path should exist" was a sentence in this skill for months, and notes still shipped with base64 images inlined at 1.4 MB, raw `<svg>` markup, and seven SVG files that no XML parser would open. A check that depends on being remembered is not a check.
+
 ## Step 5 — Link it into today's daily note
 
 Most vaults want every new note discoverable from the day it was made. Unless the vault's `CLAUDE.md` says otherwise:
@@ -111,7 +142,7 @@ Most vaults want every new note discoverable from the day it was made. Unless th
 
 ## Step 6 — Verify, then report
 
-**Check before claiming.** Every `[[wikilink]]` written should resolve to a real file, or be a deliberate stub the vault's conventions call for. Escaped pipes in tables (`[[Target\|Alias]]`) produce false "broken" hits — strip the trailing backslash before comparing. Every embedded image path should exist on disk.
+**Check before claiming.** Every `[[wikilink]]` written should resolve to a real file, or be a deliberate stub the vault's conventions call for. Escaped pipes in tables (`[[Target\|Alias]]`) produce false "broken" hits — strip the trailing backslash before comparing. **Attachments are verified by Step 4.5's script, not by eye**: state its result ("9 of 9 attachments local, Obsidian resolves all 9"), or what it flagged.
 
 **Say what happened to the daily note either way** — "linked into `Daily Notes/2026-08-24.md`", or that you did not and why. Never leave the caller to assume it happened.
 

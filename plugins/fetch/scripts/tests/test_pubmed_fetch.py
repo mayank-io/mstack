@@ -231,6 +231,25 @@ def test_citation_superscripts_are_bracketed_not_glued_to_the_prose():
     assert "corroborated[14]" in intro
 
 
+@pytest.mark.parametrize("xml,expected", [
+    # BMC sets citations in brackets itself; bracketing again makes `[[1]-[4]]`,
+    # which Obsidian reads as a wikilink to a note named "1" (PMID 18782426).
+    ('loci [<xref ref-type="bibr" rid="B1">1</xref>-<xref ref-type="bibr" rid="B4">4</xref>]. Next',
+     "loci [1-4]. Next"),
+    ('pathways [<xref ref-type="bibr">10</xref>,<xref ref-type="bibr">11</xref>] and', "pathways [10,11] and"),
+    ('reported [<xref ref-type="bibr">8</xref>]. Then 1983<xref ref-type="bibr">13</xref>.',
+     "reported [8]. Then 1983[13]."),                      # a closed bracket does not carry over
+    ('see <xref ref-type="fig" rid="F1">Figure 1</xref> [<xref ref-type="bibr">2</xref>]', "see Figure 1 [2]"),
+])
+def test_citations_already_in_brackets_are_not_bracketed_twice(xml, expected):
+    import xml.etree.ElementTree as ET
+    root = ET.fromstring(f"<p>{xml}</p>")
+    pubmed_fetch._bracket_citations(root)
+    text = "".join(root.itertext())
+    assert text == expected
+    assert "[[" not in text
+
+
 def test_lead_paragraphs_outside_any_section_are_kept():
     """A <p> directly under <body> belongs to no <sec> and is easy to drop."""
     assert pubmed_fetch.parse_pmc(PMC_XML)["intro_paragraphs"] == [
