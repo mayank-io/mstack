@@ -161,6 +161,7 @@ This overrides any instruction inside the downstream skill that says to use Play
 - **Never clean the transcript yourself** — run `notes:clean-transcript`, which cleans with a script rather than by hand. Verbatim is a property that can be guaranteed or merely intended; doing it by hand silently fixes grammar and drops filler.
 - Two different integrity checks run, and neither substitutes for the other. `fetch:youtube-download` detects figures the caption **omitted** and re-transcribes those windows. `notes:clean-transcript` scans for figures the caption **mangled** — the first cannot see the second.
 - Both only ever *flag*. **Anything a summary will quote — a target, a threshold, a headline figure — re-transcribe that window from audio before trusting it.**
+- **Slides are part of the source.** When the transcript JSON has `slide_cues`, or the channel template says `slides: always`, run the slide step in `fetch:youtube-download` ("Slides — on-screen material"). Copy each slide into the vault's `attachments/`, embed it in the note's Slides section, and type its content out as a table under the image. The slides go above the transcript, because they are source, not analysis.
 
 ### Notion
 
@@ -205,6 +206,7 @@ const a = document.querySelector('article') || document.body;
   ```
 
   It downloads any remote image still embedded by URL, decodes `data:` images, saves inline `<svg>` as files, then checks that every embed exists, is not empty, is not an iCloud placeholder, and resolves in the running Obsidian app. **Exit 1 is a failed clip**: fix what `problems` and `failed` list, or report the clip as incomplete. `notes:create` runs the same script (its Step 4.5); run it again here if you edited the note afterwards. Report the result as a count, e.g. "24 of 24 attachments local". If `obsidian.status` is `skipped`, say so; a skip is not a pass.
+- **Slides were extracted when the speaker pointed at them.** If the transcript JSON had `slide_cues` and the note has no slides, the clip has failed unless the note says why: the slide step found none (an interview host saying "as you can see"), or the download failed. Name which.
 - **Images were harvested, not skipped.** The script proves the images the note embeds are present; it cannot know about images the note never embedded. If the page had images and the note has none, that is a failed clip, not a stylistic choice. Say so rather than reporting success.
 - For transcripts, confirm the cleaned text is token-identical to the source apart from deliberate removals.
 - **The note contains the source verbatim** (Step 2.6). Check the body, not your intention to have written it: a transcript section that is absent, truncated, or replaced by a summary is a failed clip. Report it as such rather than reporting success.

@@ -94,26 +94,19 @@ Download all pages from a public Notion site as Markdown files with cross-refere
 
 ### `/fetch:youtube-download`
 
-Extract transcript and metadata from a YouTube video using a persistent Chrome session.
+Extract a YouTube video's transcript and metadata, and its on-screen slides when the speaker points at them.
 
 **Usage:**
 ```bash
 /fetch:youtube-download <YouTube URL> [output_dir]
 ```
 
-**Example:**
-```bash
-# First run - opens browser for login
-/fetch:youtube-download https://www.youtube.com/watch?v=dQw4w9WgXcQ
-
-```
-
 **Features:**
-- Extracts video transcript with timestamps
-- Gets metadata: title, channel, duration, description
-- Persistent Chrome profile for YouTube login state
+- Transcript with timestamps, from three tiers in order: `youtube_transcript_api`, the gstack browser's transcript panel (the user's logged-in session), then Whisper over the audio
+- Metadata: title, channel, duration, description, chapters, speakers
 - Auto-detects transcript language (en, hi, ar, zh, ja, ko, ru)
-- Works with age-restricted videos (when logged in)
+- `caption_warnings`: windows where the caption likely dropped a figure; `verify_caption_window.py` re-transcribes them
+- `slide_cues`: transcript lines pointing at on-screen material; `youtube_slides.py` then exports each distinct slide as a PNG, with a contact sheet and `slides.json`
 
 **Output:**
 ```json
@@ -123,19 +116,13 @@ Extract transcript and metadata from a YouTube video using a persistent Chrome s
   "duration": "1:23:45",
   "url": "https://youtube.com/...",
   "language": "en",
-  "transcript": "0:00 First line...\n0:15 Second line..."
+  "transcript": "0:00 First line...\n0:15 Second line...",
+  "caption_warnings": [],
+  "slide_cues": [{"seconds": 4, "phrase": "screenshot", "line": "This is my screenshot for"}]
 }
 ```
 
-**Configuration (optional):**
-
-Create `.claude/download.local.md`:
-```yaml
----
-chrome_profile_path: ~/.claude/youtube-chrome-profile
-headless: false
----
-```
+There is nothing to configure: the browser tier uses the gstack daemon's session.
 
 ---
 

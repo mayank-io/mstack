@@ -6,6 +6,14 @@ Output shape for a YouTube video note. Selected by `notes:clip` for any `youtube
 
 Used when no template in `channels/` matches the video's channel. A channel template overrides this one entirely — it does not merge with it.
 
+## Settings
+
+Declarative settings a channel template may override:
+
+| Setting | Values | Default | Meaning |
+|---|---|---|---|
+| `slides` | `auto` · `always` · `never` | `auto` | `auto` extracts slides when the transcript has `slide_cues`; `always` extracts even without cues (a channel that presents from slides every time); `never` skips them |
+
 ## Scope
 
 This file describes **output shape** and declarative settings only. It never sequences tool calls — fetching, cleaning and writing belong to `notes:clip`, `notes:clean-transcript` and `notes:create`. If a rule here starts saying "then run X", it has outgrown the format and belongs in a skill.
@@ -111,6 +119,20 @@ List actionable insights or forward-looking statements:
 # Description
 
 [Description from YouTube - strip hashtag lines but preserve chapter timestamps]
+
+---
+
+# Slides
+
+[One block per slide, in first-appearance order. Omit the section when the video has none.]
+
+![Slide 1 — <title on the slide>](attachments/<video-slug>-slide-01.png)
+
+*On screen at 0:35 (also 1:22, 3:53).*
+
+| <columns as on the slide> |
+|---|
+| <the slide's content, typed out verbatim> |
 
 ---
 

@@ -1,6 +1,6 @@
 ---
 name: youtube-download
-description: "Download a YouTube video's transcript and metadata using the gstack browser session. Use when the user shares a youtube.com or youtu.be URL and wants the transcript, video metadata, chapters, or speakers."
+description: "Download a YouTube video's transcript and metadata using the gstack browser session, and its on-screen slides when the speaker points at them. Use when the user shares a youtube.com or youtu.be URL and wants the transcript, video metadata, chapters, speakers or slides."
 ---
 
 # Download YouTube
@@ -108,6 +108,52 @@ If `whisper`, `yt-dlp` or `ffmpeg` is unavailable, **do not guess the figure.** 
 
 ⚠️ `caption_warnings` detects **omitted** numbers only. It cannot see a **corrupted** one (`$und00` for `$1,050`, `a,50` for `1,050`). That scan belongs to the cleaning step.
 
+## Slides — on-screen material
+
+A transcript cannot carry a slide. When the speaker says "this is my screenshot" or "as you can see", the content is on screen, and a note without the picture is missing it.
+
+### When to extract
+
+| Condition | Extract? |
+|---|---|
+| `slide_cues` in the transcript JSON is non-empty | **yes** |
+| the matching channel template declares `slides: always` | **yes**, even with no cues |
+| the matching channel template declares `slides: never` | no |
+| no cues and no channel setting | no |
+
+`slide_cues` lists transcript lines that point at on-screen material: "screenshot", "on the screen", "this slide", "as you can see", "this chart/graph/table", "you'll notice", "let me show you". A cue is a reason to look, not proof a slide exists; an interview whose host says "as you can see" yields zero slides, and that is a valid result.
+
+### How
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/youtube_slides.py" "<URL>" [output_dir]
+```
+
+Run it outside the command sandbox. It downloads the video (clients `web_safari`, `tv`, then `android`), samples a small grey frame every second, keeps frames that look like slides, and writes the most complete copy of each distinct slide:
+
+```
+<output_dir>/slides/01-0035.png …   one per distinct slide, at source resolution
+<output_dir>/contact_sheet.png      all slides tiled; absent when there are none
+<output_dir>/slides.json            {"video_id", "source_height", "interval", "samples", "slides": [{"index", "file", "t", "appearances", "ink"}]}
+```
+
+The final stdout line is `OUTPUT_DIR:<path>`, also when zero slides are found. On a download failure it exits 1 and prints no marker. `--video <file>` runs on a local file instead of downloading.
+
+### What it handles, and why
+
+- **Slides that build up.** Lines revealed one at a time and annotations drawn on stay one slide; the exported copy is the one with the most ink, i.e. the most complete.
+- **Slides shown more than once.** One file, with every time range in `appearances`.
+- **Dissolves.** A one-second blend of the talking head into a slide is dropped; runs under 2 s are not slides.
+- **An opening slide.** Sampling at a fixed interval sees a slide that is on screen from the first second; scene-change detection does not, because there is no cut.
+
+### After it runs
+
+- **Look at `contact_sheet.png` before using the slides.** The classifier separates flat slides from camera footage; a mostly-flat scene (a whiteboard wall, a plain studio) can pass as a slide.
+- **Check `source_height`.** The `android` fallback delivers 360p, and the script warns on stderr below 720p. Small text may be unreadable; say so rather than guessing a figure.
+- **Read the figures off the image, not OCR.** OCR mangles numbers the way captions do.
+
+⚠️ **Never take slides from browser screenshots of the player.** On 2026-10-09 the gstack player stopped seeking after the first frame, and seven screenshots at seven timestamps came out byte-identical, with no error.
+
 ## Output Format (v2.0)
 
 The script saves JSON to a temp file with the following structure:
@@ -152,6 +198,8 @@ The script saves JSON to a temp file with the following structure:
 | `transcript` | string | Raw transcript with timestamps |
 | `chapters` | array | Chapters extracted from description timestamps |
 | `speakers` | array | Speakers identified from description |
+| `caption_warnings` | array | Windows where the caption likely dropped a figure (see Caption verification) |
+| `slide_cues` | array | `{"seconds", "phrase", "line"}` for each transcript line pointing at on-screen material (see Slides) |
 
 ### Language Detection
 
