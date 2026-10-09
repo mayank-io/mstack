@@ -1,0 +1,174 @@
+#!/usr/bin/env bash
+# Create or sync ~/.claude-<name> config dirs that share everything with
+# ~/.claude via symlinks, except the login identity, so each can hold its own
+# account (launch with CLAUDE_CONFIG_DIR=~/.claude-<name> claude).
+#
+# Create (default): one symlink per ~/.claude entry not in EXCLUDE, plus the
+# dir's own .claude.json (~/.claude.json minus IDENTITY_KEYS). An existing dir
+# that Claude Code created on its own (no symlinks) is converted: moved aside to
+# ~/.claude-<name>.fresh-<epoch>, its login carried into the new .claude.json.
+#
+# --sync: for an already-linked dir, link ~/.claude entries added since, and
+# remove links into ~/.claude whose target is gone or whose name is excluded.
+# Never touches .claude.json, real files, or links pointing anywhere else.
+#
+# --dry-run: print planned actions on stdout (link/unlink/move/write), change
+# nothing. Progress and summaries go to stderr.
+#
+# Bash 3.2 compatible (macOS /bin/bash).
+set -euo pipefail
+
+usage() { echo "usage: clone-claude-config [--sync] [--dry-run] <name>..." >&2; exit 2; }
+
+SYNC=0
+DRY=0
+NAME_COUNT=0
+for arg in "$@"; do
+  case "$arg" in
+    --sync) SYNC=1 ;;
+    --dry-run) DRY=1 ;;
+    -*) usage ;;
+    *)
+      [ -n "$arg" ] || { echo "empty account name" >&2; exit 1; }
+      case "$arg" in */*) echo "account name must not contain '/': $arg" >&2; exit 1 ;; esac
+      NAME_COUNT=$((NAME_COUNT + 1))
+      ;;
+  esac
+done
+[ "$NAME_COUNT" -gt 0 ] || usage
+
+HOME_DIR="${HOME:?HOME unset}"
+SRC="$HOME_DIR/.claude"
+[ -f "$SRC/settings.json" ] || { echo "no settings.json in $SRC" >&2; exit 1; }
+[ -f "$HOME_DIR/.claude.json" ] || { echo "no $HOME_DIR/.claude.json to copy config from" >&2; exit 1; }
+command -v jq >/dev/null 2>&1 || { echo "jq is required but not on PATH" >&2; exit 1; }
+
+# Per-account state: never shared. .claude.json inside ~/.claude is a stale leftover.
+EXCLUDE=" .claude.json .DS_Store daemon daemon-auth-cooldown daemon-auth-status.json daemon.log bridge-spawn seed-admin mcp-needs-auth-cache.json "
+IDENTITY_KEYS='["oauthAccount","userID","hasAvailableSubscription","orgModelDefaultCache","penguinModeOrgEnabled","bridgeOauthDeadExpiresAt","bridgeOauthDeadFailCount","subscriptionNoticeCount"]'
+
+TMP=""
+cleanup() { [ -z "$TMP" ] || rm -f "$TMP"; }
+trap cleanup EXIT
+
+is_excluded() { case "$EXCLUDE" in *" $1 "*) return 0 ;; esac; return 1; }
+
+# A link is ours only if it points INTO ~/.claude/ — the trailing slash keeps
+# ~/.claude-sk/x and ~/.claudefoo out.
+points_into_src() { case "$(readlink "$1")" in "$SRC"/*) return 0 ;; esac; return 1; }
+
+do_link() {  # <src-entry> <dst-dir>
+  local b
+  b="$(basename "$1")"
+  if [ "$DRY" -eq 1 ]; then echo "link $2/$b"; else ln -s "$1" "$2/$b"; fi
+}
+
+do_unlink() {  # <link>
+  if [ "$DRY" -eq 1 ]; then echo "unlink $1"; else rm -f "$1"; fi
+}
+
+shared_entries() {  # print every non-excluded ~/.claude entry, one path per line
+  local p
+  for p in "$SRC"/* "$SRC"/.[!.]*; do
+    [ -e "$p" ] || [ -L "$p" ] || continue
+    is_excluded "$(basename "$p")" || echo "$p"
+  done
+}
+
+link_all() {  # <dst-dir>: link every shared entry into a dir that is (or will be) empty
+  local p
+  shared_entries | while IFS= read -r p; do do_link "$p" "$1"; done
+}
+
+link_missing() {  # <dst-dir>: link every shared entry not present by name
+  local p b
+  shared_entries | while IFS= read -r p; do
+    b="$(basename "$p")"
+    if [ -L "$1/$b" ]; then
+      continue
+    elif [ -e "$1/$b" ]; then
+      echo "kept local $b in $1" >&2
+    else
+      do_link "$p" "$1"
+    fi
+  done
+}
+
+prune_links() {  # <dst-dir>: drop links into ~/.claude that dangle or are excluded
+  local l b
+  for l in "$1"/* "$1"/.[!.]*; do
+    [ -L "$l" ] || continue
+    points_into_src "$l" || continue
+    b="$(basename "$l")"
+    if [ ! -e "$l" ] || is_excluded "$b"; then
+      do_unlink "$l"
+    fi
+  done
+}
+
+render_config() {  # <out-file> [fresh-config]: ~/.claude.json minus identity, plus fresh identity
+  if [ -n "${2:-}" ]; then
+    jq --argjson keys "$IDENTITY_KEYS" --slurpfile fresh "$2" '
+      (reduce $keys[] as $k (.; del(.[$k])))
+      + ($fresh[0] | with_entries(select(.key as $k | $keys | index($k))))
+    ' "$HOME_DIR/.claude.json" > "$1"
+  else
+    jq --argjson keys "$IDENTITY_KEYS" 'reduce $keys[] as $k (.; del(.[$k]))' \
+      "$HOME_DIR/.claude.json" > "$1"
+  fi
+}
+
+summarise() {  # <dst-dir>
+  local n account
+  n="$(find "$1" -maxdepth 1 -type l | wc -l | tr -d ' ')"
+  account="$(jq -r '.oauthAccount.emailAddress // "none (run /login)"' "$1/.claude.json" 2>/dev/null || echo "unknown")"
+  echo "$1: $n symlinks; account: $account" >&2
+}
+
+create() {  # <dst-dir>: new dir, or convert an unlinked one
+  local dst="$1" fresh="" fresh_cfg=""
+  if [ -e "$dst" ]; then
+    fresh="$dst.fresh-$(date +%s)"
+    [ -f "$dst/.claude.json" ] && fresh_cfg="$dst/.claude.json"
+  fi
+
+  # Every read completes before the first write: render into a temp file,
+  # reading the unlinked dir's config in place, so a jq failure leaves it as is.
+  TMP="$(mktemp "$HOME_DIR/.clone-claude-config.XXXXXX")"  # same filesystem: the final mv is atomic
+  render_config "$TMP" "$fresh_cfg" || { echo "could not build $dst/.claude.json" >&2; exit 1; }
+
+  if [ "$DRY" -eq 1 ]; then
+    [ -z "$fresh" ] || echo "move $dst $fresh"
+    echo "write $dst/.claude.json"
+    link_all "$dst"
+    rm -f "$TMP"; TMP=""
+    return
+  fi
+
+  if [ -n "$fresh" ]; then
+    mv "$dst" "$fresh"
+    echo "moved unlinked $dst -> $fresh" >&2
+  fi
+  mkdir "$dst"
+  link_all "$dst"
+  mv "$TMP" "$dst/.claude.json"
+  TMP=""
+  chmod 600 "$dst/.claude.json"
+  summarise "$dst"
+}
+
+for name in "$@"; do
+  case "$name" in --sync|--dry-run) continue ;; esac
+  DST="$HOME_DIR/.claude-$name"
+  if [ -e "$DST" ] && [ -n "$(find "$DST" -maxdepth 1 -type l -print -quit)" ]; then
+    if [ "$SYNC" -eq 0 ]; then
+      echo "already linked, skipping: $DST (use --sync to update)" >&2
+      continue
+    fi
+    link_missing "$DST"
+    prune_links "$DST"
+    [ "$DRY" -eq 1 ] || summarise "$DST"
+  else
+    create "$DST"
+  fi
+done

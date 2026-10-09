@@ -9,7 +9,7 @@ dependencies = []
 dev = ["pytest>=8.0"]
 
 [tool.pytest.ini_options]
-testpaths = ["plugins"]
+testpaths = ["plugins", "scripts"]
 python_files = ["test_*.py"]
 addopts = "-q"
 
