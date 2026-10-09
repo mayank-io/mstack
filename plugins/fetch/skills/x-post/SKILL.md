@@ -292,7 +292,7 @@ The wait cannot live in page JS — `$B js` returns before a promise resolves, s
 xpost_download.download_open_post(page, handle, out_dir, day, download_media=True)
 ```
 
-It returns `{note, fname, status_id, root_id, is_thread, post_count, media, author_name, date, member_ids}`, or `{"error": ...}`. `page` must be a **sync**-shaped page — `_browse.sync_browse_page()` gives you one over gstack. This is the seam the x-account bulk harvester uses: `scripts/xaccount_iterate.py <handle> <out_dir> <max_posts>` scrolls a profile, Cmd+Clicks each post into a new tab, and hands the tab to `download_open_post`. Note that the iterator currently drives its **own** Playwright profile at `~/.claude/x-playwright-profile` rather than gstack, so it is not covered by the headed-mode guarantee above; prefer this skill's CLI for single posts.
+It returns `{note, fname, status_id, root_id, is_thread, post_count, media, author_name, date, member_ids}`, or `{"error": ...}`. `page` must be a **sync**-shaped page — `_browse.sync_browse_page()` gives you one over gstack. This is the seam the x-account bulk harvester uses: `scripts/xaccount_iterate.py <handle> <out_dir> <max_posts>` runs in the same gstack browser (headed-mode guarantee included), scrolls a profile, opens each post in a new tab, hands the tab to `download_open_post`, then closes it and returns to the profile tab. It exits 3 without opening any tab if the gstack browser is not logged in to X. Use this skill's CLI for single posts.
 
 ## Tips
 

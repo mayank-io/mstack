@@ -411,3 +411,97 @@ def test_sync_session_never_tears_down_the_daemon():
     assert isinstance(page, _browse.SyncBrowsePage)
     session.__exit__(None, None, None)
     assert not any(c[0] == "disconnect" for c in session._page.calls)
+
+
+# ---------------------------------------------------------------- tabs
+
+class TabSpy(_browse.BrowsePage):
+    """Returns canned replies per `$B` subcommand and records every call."""
+
+    def __init__(self, replies=None):
+        self.calls = []
+        self.replies = replies or {}
+
+    def _run(self, *args, **kwargs):
+        self.calls.append(args)
+        return self.replies.get(args[0], "")
+
+
+def test_new_tab_returns_the_tab_id():
+    """The iterator closes each post's tab by id; a wrong id closes the user's
+    profile tab instead."""
+    spy = TabSpy({"newtab": '{"tabId":7,"url":"https://x.com/a/status/1"}\n'})
+    assert spy.new_tab("https://x.com/a/status/1") == 7
+    assert spy.calls == [("newtab", "https://x.com/a/status/1", "--json")]
+
+
+def test_new_tab_tolerates_browse_progress_chatter():
+    spy = TabSpy({"newtab": '[browse] Starting server...\n{"tabId":3,"url":null}\n'})
+    assert spy.new_tab("https://x.com/") == 3
+
+
+def test_new_tab_without_an_id_raises():
+    """No id means no way to close the tab again — refuse rather than leak it."""
+    with pytest.raises(_browse.BrowseError, match="tab id"):
+        TabSpy({"newtab": "Opened tab 3\n"}).new_tab("https://x.com/")
+    with pytest.raises(_browse.BrowseError, match="tab id"):
+        TabSpy({"newtab": '{"tabId":"3"}\n'}).new_tab("https://x.com/")
+
+
+def test_new_tab_requires_a_url():
+    with pytest.raises(ValueError):
+        TabSpy().new_tab("")
+
+
+_TABS = (
+    "  [1] Home / X — https://x.com/home\n"
+    "→ [4] bob (@bob) / X — https://x.com/bob\n"
+    "  [5] (untitled) — about:blank\n"
+)
+
+
+def test_active_tab_parses_the_arrow_line():
+    assert TabSpy({"tabs": _TABS}).active_tab() == 4
+
+
+def test_active_tab_raises_when_none_is_marked():
+    """Guessing a tab would switch the user's view somewhere arbitrary."""
+    with pytest.raises(_browse.BrowseError, match="active tab"):
+        TabSpy({"tabs": _TABS.replace("→", " ")}).active_tab()
+    with pytest.raises(_browse.BrowseError, match="active tab"):
+        TabSpy({"tabs": ""}).active_tab()
+
+
+def test_switch_and_close_pass_the_id():
+    spy = TabSpy()
+    spy.switch_tab(4)
+    spy.close_tab(7)
+    assert spy.calls == [("tab", "4"), ("closetab", "7")]
+
+
+@pytest.mark.parametrize("bad", [None, "7", 7.0, True])
+def test_close_tab_refuses_anything_but_an_int(bad):
+    """`$B closetab` with no id closes the ACTIVE tab — possibly the user's own.
+    Never let a missing id reach it."""
+    spy = TabSpy()
+    with pytest.raises(TypeError):
+        spy.close_tab(bad)
+    assert spy.calls == []
+
+
+@pytest.mark.parametrize("bad", [None, "4", True])
+def test_switch_tab_refuses_anything_but_an_int(bad):
+    spy = TabSpy()
+    with pytest.raises(TypeError):
+        spy.switch_tab(bad)
+    assert spy.calls == []
+
+
+def test_sync_facade_exposes_the_tab_surface():
+    spy = TabSpy({"newtab": '{"tabId":9}\n', "tabs": _TABS})
+    page = _browse.SyncBrowsePage(spy)
+    assert page.active_tab() == 4
+    assert page.new_tab("https://x.com/a/status/1") == 9
+    page.switch_tab(4)
+    page.close_tab(9)
+    assert [c[0] for c in spy.calls] == ["tabs", "newtab", "tab", "closetab"]

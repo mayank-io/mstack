@@ -6,7 +6,7 @@ Playwright instance is logged out and silently returns login walls or truncated
 content that looks like a successful capture. gstack exposes no CDP socket to
 attach to, so we drive its CLI instead.
 
-Only the surface these scripts actually used is implemented: goto,
+Only the surface these scripts actually used is implemented: goto, tabs,
 wait_for_selector, evaluate. Signatures match Playwright's so call sites barely
 change.
 """
@@ -326,6 +326,44 @@ class BrowsePage:
         lines = [ln.strip() for ln in out.splitlines() if ln.strip()]
         return lines[-1] if lines else ""
 
+    # -- tabs ---------------------------------------------------------------
+    #
+    # Playwright's `context.expect_page()` + Cmd+Click has no equivalent over
+    # the CLI: gstack has no element handles. Its tab commands are the seam
+    # instead. Every id is required and must be an int: `$B closetab` and
+    # `$B tab` with a missing id act on the ACTIVE tab, which may be one of
+    # the user's own.
+
+    @staticmethod
+    def _require_tab_id(tab_id) -> str:
+        if type(tab_id) is not int:  # bool is an int subclass; refuse it too
+            raise TypeError(f"tab id must be an int, got {tab_id!r}")
+        return str(tab_id)
+
+    def new_tab(self, url: str) -> int:
+        """Open `url` in a new tab, make it active, and return its id."""
+        if not url:
+            raise ValueError("new_tab() needs a url")
+        reply = self._parse(self._run("newtab", url, "--json", timeout=60))
+        tab_id = reply.get("tabId") if isinstance(reply, dict) else None
+        if type(tab_id) is not int:
+            raise BrowseError(f"`browse newtab` returned no tab id: {reply!r}")
+        return tab_id
+
+    def active_tab(self) -> int:
+        """The id of the active tab, from the `→ [N]` marker in `$B tabs`."""
+        for line in self._run("tabs", timeout=60).splitlines():
+            stripped = line.strip()
+            if stripped.startswith("→ ["):
+                return int(stripped[3:stripped.index("]")])
+        raise BrowseError("`browse tabs` marked no active tab")
+
+    def switch_tab(self, tab_id: int) -> None:
+        self._run("tab", self._require_tab_id(tab_id), timeout=60)
+
+    def close_tab(self, tab_id: int) -> None:
+        self._run("closetab", self._require_tab_id(tab_id), timeout=60)
+
 
 class browse_page:
     """`async with browse_page() as page:` — mirrors the async_playwright() block."""
@@ -378,6 +416,18 @@ class SyncBrowsePage:
 
     def cookies(self) -> list:
         return self._page.cookies()
+
+    def new_tab(self, url: str) -> int:
+        return self._page.new_tab(url)
+
+    def active_tab(self) -> int:
+        return self._page.active_tab()
+
+    def switch_tab(self, tab_id: int) -> None:
+        self._page.switch_tab(tab_id)
+
+    def close_tab(self, tab_id: int) -> None:
+        self._page.close_tab(tab_id)
 
 
 class sync_browse_page:

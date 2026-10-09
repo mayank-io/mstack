@@ -43,6 +43,10 @@ ROUTED = [
     # logged-out Pulse page that still renders the title and first paragraphs,
     # so a fresh browser would capture a truncated article that looks complete.
     "linkedin_article_download.py",
+    # Added 2026-10-10. The x-account bulk iterator launched its own Playwright
+    # Chromium on a private profile at ~/.claude/x-playwright-profile — a
+    # second X login to keep alive, logged out whenever its cookies lapsed.
+    "xaccount_iterate.py",
 ]
 
 # Scripts that RECEIVE a page rather than opening one. They must never acquire a
