@@ -1,0 +1,54 @@
+
+logger = logging.getLogger(__name__)
+
+# Where session events go. The receiver is open source: deploy/beacon/worker.js.
+#
+# TEMPORARY: this is a Cloudflare workers.dev address, which is a *vendor*
+# hostname. OSS users pin versions and old releases live for years, so whatever
+# ships in a tagged release is effectively permanent — a vendor URL here marries
+# Headroom to Cloudflare and looks alarming to anyone who runs `strings` on the
+# package. Move this to otlp.headroomlabs.ai (one CNAME, or a Cloudflare zone)
+# before cutting a release that contains it.
+DEFAULT_ENDPOINT = "https://headroom-beacon.headroom-beacon.workers.dev/v1/logs"
+SCHEMA_VERSION = 2
+
+# A gap longer than this closes the session. Agent loops are bursty; 15 minutes
+# separates "reading the diff before the next prompt" from "walked away".
+IDLE_TIMEOUT_S = 900.0
+
+# How often a live session reports in. Each report is a *cumulative snapshot*
+# of the same session, not a slice of it — see _Session.payload.
+FLUSH_INTERVAL_S = 300.0
+# `headroom.proxy.output_savings_policy` rather than imported. The telemetry
+# package deliberately does not import `headroom.proxy` (see `record_stack`),
+# and two string constants are a smaller price than that dependency.
+_STRATUM_TREATMENT = "output_shaper:stratum:"
+_STRATUM_CONTROL = "output_shaper:control:"
+
+# Environment variables whose values may be reported, by name. An allowlist,
+# never a dump of the environment: a variable absent from this tuple cannot
+# reach the wire whatever it holds, and every value that does is put through
+# `_safe_slug` first, so a var that unexpectedly holds a URL or a path reports
+# "other" rather than its contents.
+#
+# Endpoints, tokens, paths, ports and hostnames are excluded by construction —
+# only settings whose vocabulary is a small closed set are listed. This answers
+# the question the corpus currently cannot: whether a session with poor savings
+# is a compression failure or simply a configuration.
+_CONFIG_ENV_KEYS = (
+    "HEADROOM_MODE",
+    "HEADROOM_SAVINGS_PROFILE",
+    "HEADROOM_DEPLOYMENT_PROFILE",
+    "HEADROOM_ROLLOUT_CHANNEL",
+    "HEADROOM_CCR_BACKEND",
+    "HEADROOM_MEMORY_INJECTION_MODE",
+    "HEADROOM_OUTPUT_SHAPER",
+    "HEADROOM_OUTPUT_HOLDOUT",
+    "HEADROOM_LOSSLESS",
+    "HEADROOM_DEDUPE",
+    "HEADROOM_STATELESS",
+    "HEADROOM_CODE_AWARE_ENABLED",
+    "HEADROOM_PROTECT_TOOL_RESULTS",
+    "HEADROOM_INTERCEPT_TOOL_RESULTS",
+    "HEADROOM_DISABLE_KOMPRESS",
+)
