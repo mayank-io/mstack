@@ -49,6 +49,7 @@ from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from _browse import browse_page  # noqa: E402
+from youtube_slides import find_slide_cues  # noqa: E402
 
 
 def _extract_video_id(url: str) -> str | None:
@@ -997,6 +998,18 @@ async def main():
                 s, e = w['start_seconds'], w['end_seconds']
                 print(f"   {s // 60}:{s % 60:02d}-{e // 60}:{e % 60:02d}  {w['snippet'][:90]}",
                       file=sys.stderr)
+
+    # --- Slide cues (the speaker points at something on screen) ---
+    # The transcript cannot carry a slide. When the speaker says "this is my
+    # screenshot", the note needs the picture too; youtube_slides.py gets it.
+    if result.get('transcript') and not result.get('error'):
+        cues = find_slide_cues(result['transcript'])
+        result['slide_cues'] = cues
+        if cues:
+            first = cues[0]['seconds']
+            print(f"\n▣ Slide cues: {len(cues)} line(s) point at on-screen material "
+                  f"(first at {first // 60}:{first % 60:02d}, \"{cues[0]['phrase']}\") — "
+                  f"extract slides with youtube_slides.py", file=sys.stderr)
 
     # --- Write output ---
     if args.output:
