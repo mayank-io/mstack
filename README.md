@@ -49,6 +49,8 @@ Iterative reviews, doc conventions, and feedback loops for serious engineering w
 | `/dev:setup-doc-conventions` | Bootstrap `docs/templates/`, dashboard, Obsidian config, and CLAUDE.md workflow section |
 | `/dev:finish-work-on-local-worktree` | Squash-merge a worktree into main, update doc statuses, refresh the project plan, recommend next work |
 | `/dev:summarize-this-session` | Two-section conversation recap: ongoing task + continuous-improvement insights |
+| `/dev:safe-pause` | Bring the session and its subagents to a resumable stop at a `task` (default), `milestone` or `project` boundary: every worktree committed, nothing pushed, RESUME.md written to `~/.local/state/mk-pause/<session>/` |
+| `/dev:safe-resume` | Continue from a safe-pause: verifies every recorded worktree tip (refuses on a mismatch), re-sends the first message only if a coordinator was recorded, continues in the recorded order. Auto-suggested on `claude --resume`/`--continue` when a pause state exists |
 
 Bundled assets:
 - 10 doc-type templates (`design`, `impl-plan`, `cutover-plan`, `analysis`, `report`, `postmortem`, `kb`, `ops-guide`, `playbook`, `experiment`)

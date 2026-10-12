@@ -6,7 +6,7 @@
   },
   "metadata": {
     "description": "Mayank's stack of Claude Code plugins for development and continuous improvement workflows",
-    "version": "0.20.2",
+    "version": "0.21.0",
     "pluginRoot": "./plugins"
   },
   "plugins": [
@@ -49,7 +49,7 @@
     {
       "name": "fetch",
       "source": "./plugins/fetch",
-      "description": "Fetch content from a source into a directory — YouTube, X, Notion, Scribd, arXiv, blogs — plus Vedic chart digitisation. Output location is a parameter; nothing here knows about vaults.",
+      "description": "Fetch content from a source into a directory \u2014 YouTube, X, Notion, Scribd, arXiv, blogs \u2014 plus Vedic chart digitisation. Output location is a parameter; nothing here knows about vaults.",
       "author": {
         "name": "Mayank"
       },
@@ -96,7 +96,7 @@
     {
       "name": "think",
       "source": "./plugins/think",
-      "description": "Parallel divergent ideation for coding agents. The adhd skill spawns N isolated reasoning branches under different cognitive frames, scores them, prunes traps, and deepens the survivors — escaping premature convergence on architecture, naming, API design, fuzzy debugging, and strategy. Vendored from UditAkhourii/adhd.",
+      "description": "Parallel divergent ideation for coding agents. The adhd skill spawns N isolated reasoning branches under different cognitive frames, scores them, prunes traps, and deepens the survivors \u2014 escaping premature convergence on architecture, naming, API design, fuzzy debugging, and strategy. Vendored from UditAkhourii/adhd.",
       "author": {
         "name": "Udit Akhouri",
         "url": "https://github.com/UditAkhourii/adhd"
