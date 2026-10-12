@@ -35,12 +35,25 @@ def repo(tmp_path):
 
 
 @pytest.fixture
+def other_repo(tmp_path):
+    r = tmp_path / "other"
+    r.mkdir()
+    git(r, "init", "-q", "-b", "main")
+    git(r, "config", "user.email", "t@t")
+    git(r, "config", "user.name", "t")
+    (r / "a.txt").write_text("a\n")
+    git(r, "add", "a.txt")
+    git(r, "commit", "-qm", "init")
+    return r
+
+
+@pytest.fixture
 def state_root(tmp_path):
     return tmp_path / "state"
 
 
 def add_worktree(repo, name):
-    wt = repo.parent / f"wt-{name}"
+    wt = repo.parent / f"wt-{repo.name}-{name}"
     git(repo, "worktree", "add", "-q", "-b", name, str(wt))
     return wt
 
@@ -82,6 +95,12 @@ def test_dirty_returns_only_dirty_paths(repo):
     assert [Path(p).resolve() for p in ps.dirty(repo)] == [wt.resolve()]
 
 
+def test_dirty_ignores_the_primary_checkout(repo):
+    add_worktree(repo, "feat")
+    (repo / "untracked.txt").write_text("not ours\n")
+    assert ps.dirty(repo) == []
+
+
 def test_dirty_is_empty_when_everything_is_committed(repo):
     add_worktree(repo, "feat")
     assert ps.dirty(repo) == []
@@ -112,11 +131,12 @@ def test_write_creates_resume_under_session_dir_and_indexes_session_id(repo, sta
     assert ps.locate(state_root, session_id="abc-123") == path
 
 
-def test_write_refuses_when_a_worktree_is_dirty(repo, state_root):
-    (repo / "a.txt").write_text("dirty\n")
+def test_write_refuses_when_an_owned_worktree_is_dirty(repo, state_root):
+    wt = add_worktree(repo, "feat")
+    (wt / "b.txt").write_text("dirty\n")
     with pytest.raises(ps.DirtyWorktree) as e:
         ps.write(state_root, session="s", session_id="id", mode="task", cwd=repo, body="")
-    assert str(repo.resolve()) in str(e.value)
+    assert str(wt.resolve()) in str(e.value)
 
 
 def test_write_rejects_unknown_mode(repo, state_root):
@@ -138,6 +158,119 @@ def test_locate_ignores_already_resumed_state(repo, state_root):
     ps.mark_resumed(path)
     assert ps.locate(state_root, session_id="id-1", cwd=repo) is None
     assert ps.read_frontmatter(path)["resumed_at"]
+
+
+# ---- primary checkout is a baseline, not a gate --------------------------------
+
+def test_write_accepts_untracked_files_in_the_primary_checkout(repo, state_root):
+    add_worktree(repo, "feat")
+    (repo / "docs").mkdir()
+    (repo / "docs" / "app.json").write_text("{}\n")
+    path = ps.write(state_root, session="s", session_id="id", mode="task", cwd=repo, body="")
+    primary = [w for w in ps.read_frontmatter(path)["worktrees"] if w["primary"]][0]
+    assert primary["baseline_count"] == 1
+    assert len(primary["baseline_sha"]) == 64
+    assert ps.verify(path) == []
+
+
+def test_verify_warns_when_the_primary_baseline_changes(repo, state_root):
+    add_worktree(repo, "feat")
+    path = ps.write(state_root, session="s", session_id="id", mode="task", cwd=repo, body="")
+    (repo / "new.txt").write_text("x\n")
+    assert ps.verify(path) == []
+    assert [w["reason"] for w in ps.verify(path, warnings=True)] == ["primary-changed"]
+
+
+def test_verify_warns_but_does_not_refuse_when_primary_tip_moves(repo, state_root):
+    add_worktree(repo, "feat")
+    path = ps.write(state_root, session="s", session_id="id", mode="task", cwd=repo, body="")
+    (repo / "a.txt").write_text("landed by someone else\n")
+    git(repo, "commit", "-qam", "lander")
+    assert ps.verify(path) == []
+    assert [w["reason"] for w in ps.verify(path, warnings=True)] == ["primary-tip-moved"]
+
+
+# ---- several repos ---------------------------------------------------------------
+
+def test_write_records_worktrees_from_every_repo(repo, other_repo, state_root):
+    a = add_worktree(repo, "feat")
+    b = add_worktree(other_repo, "feat")
+    path = ps.write(state_root, session="s", session_id="id", mode="task", repos=[repo, other_repo], body="")
+    fm = ps.read_frontmatter(path)
+    paths = {Path(w["path"]).resolve() for w in fm["worktrees"]}
+    assert {a.resolve(), b.resolve(), repo.resolve(), other_repo.resolve()} <= paths
+    assert [Path(r["path"]).resolve() for r in fm["repos"]] == [repo.resolve(), other_repo.resolve()]
+
+
+def test_verify_checks_tips_in_the_second_repo(repo, other_repo, state_root):
+    add_worktree(repo, "feat")
+    b = add_worktree(other_repo, "feat")
+    path = ps.write(state_root, session="s", session_id="id", mode="task", repos=[repo, other_repo], body="")
+    (b / "c.txt").write_text("c\n")
+    git(b, "add", "c.txt"); git(b, "commit", "-qm", "moved")
+    problems = ps.verify(path)
+    assert [(Path(p["path"]).resolve(), p["reason"]) for p in problems] == [(b.resolve(), "tip-moved")]
+
+
+def test_write_refuses_a_dirty_worktree_in_the_second_repo(repo, other_repo, state_root):
+    b = add_worktree(other_repo, "feat")
+    (b / "x.txt").write_text("x\n")
+    with pytest.raises(ps.DirtyWorktree):
+        ps.write(state_root, session="s", session_id="id", mode="task", repos=[repo, other_repo], body="")
+
+
+def test_locate_finds_state_from_any_recorded_repo(repo, other_repo, state_root):
+    path = ps.write(state_root, session="s", session_id="id", mode="task", repos=[repo, other_repo], body="")
+    assert ps.locate(state_root, cwd=other_repo) == path
+
+
+def test_write_rejects_no_repo(state_root):
+    with pytest.raises(ValueError):
+        ps.write(state_root, session="s", session_id="id", mode="task", repos=[], body="")
+
+
+# ---- owned worktrees only --------------------------------------------------------
+
+def test_owned_limits_recording_to_named_branches(repo, state_root):
+    mine = add_worktree(repo, "mine")
+    theirs = add_worktree(repo, "theirs")
+    path = ps.write(state_root, session="s", session_id="id", mode="task", cwd=repo, owned=["mine"], body="")
+    recorded = {Path(w["path"]).resolve() for w in ps.read_frontmatter(path)["worktrees"] if not w["primary"]}
+    assert recorded == {mine.resolve()}
+    (theirs / "t.txt").write_text("t\n")
+    git(theirs, "add", "t.txt"); git(theirs, "commit", "-qm", "another session")
+    assert ps.verify(path) == []
+
+
+def test_owned_ignores_dirty_worktrees_of_other_sessions(repo, state_root):
+    add_worktree(repo, "mine")
+    theirs = add_worktree(repo, "theirs")
+    (theirs / "wip.txt").write_text("not mine\n")
+    ps.write(state_root, session="s", session_id="id", mode="task", cwd=repo, owned=["mine"], body="")
+
+
+def test_owned_accepts_a_worktree_path(repo, state_root):
+    mine = add_worktree(repo, "mine")
+    add_worktree(repo, "theirs")
+    path = ps.write(state_root, session="s", session_id="id", mode="task", cwd=repo, owned=[str(mine)], body="")
+    recorded = [w["branch"] for w in ps.read_frontmatter(path)["worktrees"] if not w["primary"]]
+    assert recorded == ["mine"]
+
+
+def test_owned_name_that_matches_nothing_is_an_error(repo, state_root):
+    add_worktree(repo, "mine")
+    with pytest.raises(ValueError) as e:
+        ps.write(state_root, session="s", session_id="id", mode="task", cwd=repo, owned=["mnie"], body="")
+    assert "mnie" in str(e.value)
+
+
+def test_verify_still_reads_state_written_before_repos_existed(repo, state_root):
+    path = state_root / "old" / "RESUME.md"
+    path.parent.mkdir(parents=True)
+    tip = git(repo, "rev-parse", "HEAD")
+    path.write_text(f'---\nsession: "old"\nresumed_at: null\ncwd: "{repo}"\nworktrees:\n  - path: "{repo}"\n    branch: "main"\n    tip: "{tip}"\n    primary: true\n---\n')
+    (repo / "a.txt").write_text("landed\n"); git(repo, "commit", "-qam", "landed")
+    assert ps.verify(path) == []
 
 
 # ---- verify -----------------------------------------------------------------
@@ -199,10 +332,11 @@ def test_cli_snapshot_prints_json_rows(repo):
 
 
 def test_cli_dirty_exits_one_and_lists_paths_on_stderr(repo):
-    (repo / "a.txt").write_text("x\n")
+    wt = add_worktree(repo, "feat")
+    (wt / "a.txt").write_text("x\n")
     r = cli("dirty", "--cwd", str(repo))
     assert r.returncode == 1
-    assert str(repo.resolve()) in r.stderr
+    assert str(wt.resolve()) in r.stderr
 
 
 def test_cli_write_then_locate_then_verify_then_mark(repo, state_root, tmp_path):
@@ -225,10 +359,34 @@ def test_cli_write_then_locate_then_verify_then_mark(repo, state_root, tmp_path)
 
 def test_cli_verify_exits_two_and_names_mismatch(repo, state_root, tmp_path):
     env = {**os.environ, "MK_PAUSE_ROOT": str(state_root)}
+    wt = add_worktree(repo, "feat")
     body = tmp_path / "b.md"; body.write_text("")
     path = Path(cli("write", "--session", "s", "--session-id", "id", "--mode", "task", "--cwd", str(repo), "--body", str(body), env=env).stdout.strip())
-    (repo / "a.txt").write_text("moved\n")
-    git(repo, "commit", "-qam", "moved")
+    (wt / "a.txt").write_text("moved\n")
+    git(wt, "commit", "-qam", "moved")
     r = cli("verify", "--resume", str(path))
     assert r.returncode == 2
-    assert "main" in r.stderr and "tip-moved" in r.stderr
+    assert "feat" in r.stderr and "tip-moved" in r.stderr
+
+
+def test_cli_write_takes_several_repos_and_owned_branches(repo, other_repo, state_root, tmp_path):
+    env = {**os.environ, "MK_PAUSE_ROOT": str(state_root)}
+    add_worktree(repo, "feat"); add_worktree(repo, "theirs"); add_worktree(other_repo, "feat")
+    body = tmp_path / "b.md"; body.write_text("")
+    r = cli("write", "--session", "s", "--session-id", "id", "--mode", "task",
+            "--repo", str(repo), "--repo", str(other_repo), "--owned", "feat", "--body", str(body), env=env)
+    assert r.returncode == 0, r.stderr
+    fm = ps.read_frontmatter(Path(r.stdout.strip()))
+    owned = sorted((Path(w["repo"]).name, w["branch"]) for w in fm["worktrees"] if not w["primary"])
+    assert owned == [("other", "feat"), ("repo", "feat")]
+
+
+def test_cli_verify_prints_warnings_but_exits_zero(repo, state_root, tmp_path):
+    env = {**os.environ, "MK_PAUSE_ROOT": str(state_root)}
+    add_worktree(repo, "feat")
+    body = tmp_path / "b.md"; body.write_text("")
+    path = cli("write", "--session", "s", "--session-id", "id", "--mode", "task", "--cwd", str(repo), "--body", str(body), env=env).stdout.strip()
+    (repo / "new.txt").write_text("x\n")
+    r = cli("verify", "--resume", path)
+    assert r.returncode == 0
+    assert "warning" in r.stderr and "primary-changed" in r.stderr

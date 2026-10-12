@@ -35,7 +35,7 @@ Use `bash` with `set -euo pipefail` and `"${VAR:?}"` for every path variable. `P
 1. **Freeze intake.** Record the mode and the wall-clock time. From here on decline new work.
 2. **Detect topology, do not assume it.** The session has a coordinator only if its config or memory names a PM, or `ListAgents` shows a peer it has already exchanged messages with. Note the lander the same way. A session that runs independently reports to MK only.
 3. **Signal every live subagent** with the mode. In `task` mode each one finishes its unit (or, with `--now`, stops at its last green point), commits, writes its own `RESUME.md` section (branch, worktree, tip, tests passed and owed, review state, exact next command), and exits. In `milestone` and `project` modes keep orchestrating until the mode's stop point, then do the same.
-4. **Make every worktree clean.** `PS dirty --cwd <repo>` lists what is still dirty. In each listed worktree commit the real work or a `wip(pause): <built> / <owed>` commit. Repeat until `dirty` exits 0. Never commit on a primary main.
+4. **Make every owned worktree clean.** List the session's repos (every repo it or its agents worked in) and the branches it owns. `PS dirty --repo <repo> [--repo <repo2>] --owned <branch> [--owned <branch2>]` lists what is still dirty. In each listed worktree commit the real work or a `wip(pause): <built> / <owed>` commit. Repeat until `dirty` exits 0. The primary checkout is never listed and never committed on: files already there, whoever left them, are recorded as a baseline instead.
 5. **Write the resume body** to a scratch file with these sections, in this order:
    - `## First message` — the exact text to re-send to the coordinator on resume, or `none`.
    - `## First command` — the single exact command to run first on resume.
@@ -44,7 +44,7 @@ Use `bash` with `set -euo pipefail` and `"${VAR:?}"` for every path variable. `P
    - `## Blockers` — each with who holds it.
    - `## Subagents` — each subagent's section from step 3.
    - `## Peer messages logged` — every message acknowledged during the run-down.
-6. **Record the state.** `PS write --session <session-name> --session-id <id> --mode <mode> --cwd <repo> --body <file> [--coordinator <name>] [--lander <name>]`. It snapshots every worktree's branch and tip into the frontmatter and refuses while anything is dirty. The session name is the one set with `/rename`; the id is `$CLAUDE_SESSION_ID` when set, else the id in this session's scratchpad path.
+6. **Record the state.** `PS write --session <session-name> --session-id <id> --mode <mode> --repo <repo> [--repo <repo2>] --owned <branch> [--owned <branch2>] --body <file> [--coordinator <name>] [--lander <name>]`. Pass every repo the session touched, so resume verifies all of them. Pass `--owned` for each branch (or worktree path) the session owns; without it every non-primary worktree is treated as the session's, including other sessions'. It records each owned worktree's branch and tip, records each primary checkout as a baseline, and refuses while an owned worktree is dirty or an `--owned` name matches nothing. The session name is the one set with `/rename`; the id is `$CLAUDE_SESSION_ID` when set, else the id in this session's scratchpad path.
 7. **Pointer in auto-memory.** Add one line to this project's `MEMORY.md`: `- [Paused <session-name>](...) — resume via /dev:safe-resume, state at <RESUME.md path>`.
 8. **Report, by topology.** Coordinator present: send the pause report (mode, time, branches with tips, owed steps, RESUME.md path) to the PM, and to the lander if one of the branches is queued there. No coordinator: report to MK in the terminal only; RESUME.md already holds it. Never message a peer this session has never talked to. Never broadcast.
 9. **Stop.** `task`: exit when the last subagent has. `milestone`: stop after READY is reported, session stays up. `project`: stop after LAND READY (or LANDED).
@@ -54,5 +54,6 @@ Use `bash` with `set -euo pipefail` and `"${VAR:?}"` for every path variable. `P
 - "I'll push this one branch so it isn't lost" → nothing is pushed. The commit is the safety.
 - "The suite will only take a few minutes" → no suite is started to finish.
 - "This dispatch is tiny, I'll take it" → intake is frozen.
-- "I'll write RESUME.md from memory later" → write it before exiting; `PS write` refuses dirty worktrees for this reason.
+- "I'll write RESUME.md from memory later" → write it before exiting; `PS write` refuses dirty owned worktrees for this reason.
+- "The tool refused, so I'll record a different repo instead" → no. Pass every repo with `--repo` and the session's branches with `--owned`; a refusal names an owned worktree to commit.
 - "The PM probably wants to know" when no PM has been talked to → report to MK only.

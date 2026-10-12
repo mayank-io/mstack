@@ -6,18 +6,28 @@ Layout:
     <root>/<session-name>/RESUME.md     the resume memory (YAML frontmatter + markdown body)
     <root>/.index/<session-id>          one line: the session name (lets a hook find it by id)
 
-Subcommands (data on stdout, messages on stderr):
-    snapshot      --cwd DIR                       JSON rows: every worktree with branch, tip, dirty, primary
-    dirty         --cwd DIR                       exit 1 and list dirty worktree paths on stderr
-    write         --session NAME --session-id ID --mode task|milestone|project --cwd DIR --body FILE
-                  [--coordinator NAME] [--lander NAME]   refuses while any worktree is dirty; prints RESUME.md path
-    locate        [--session-id ID] [--cwd DIR]   print the un-resumed RESUME.md for this session, exit 1 if none
-    verify        --resume PATH                   exit 2 and name every worktree whose tip moved, is dirty, or is gone
-    mark-resumed  --resume PATH                   stamp resumed_at so locate stops returning it
+What is recorded, per repo the session worked in:
+    owned worktrees    every non-primary worktree, or only those named with --owned.
+                       Must be clean to pause; on resume, tip moved / dirty / missing refuses.
+    primary checkout   recorded as a baseline (tip, plus a hash of its uncommitted files),
+                       never required clean: the pause rules forbid touching it, and other
+                       sessions may land onto it. On resume a change is a warning, not a refusal.
+
+Subcommands (data on stdout, messages on stderr). --repo is repeatable; --cwd is its alias.
+    snapshot      --repo DIR...                         JSON rows: every worktree with repo, branch, tip, dirty, primary
+    dirty         --repo DIR... [--owned B...]          exit 1 and list dirty owned worktrees on stderr
+    write         --session NAME --session-id ID --mode task|milestone|project --repo DIR...
+                  [--owned BRANCH_OR_PATH...] --body FILE [--coordinator NAME] [--lander NAME]
+                                                        refuses while an owned worktree is dirty; prints RESUME.md path
+    locate        [--session-id ID] [--cwd DIR]         print the un-resumed RESUME.md for this session, exit 1 if none
+    verify        --resume PATH                         exit 2 naming owned worktrees whose tip moved, are dirty or gone;
+                                                        primary-checkout changes print as warnings and exit 0
+    mark-resumed  --resume PATH                         stamp resumed_at so locate stops returning it
 """
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import subprocess
@@ -43,8 +53,12 @@ def _git(cwd: Path, *args: str) -> str:
 
 # ---- worktree facts ---------------------------------------------------------
 
+def _status(path: Path) -> list[str]:
+    return sorted(_git(path, "status", "--porcelain", "--untracked-files=all").splitlines())
+
+
 def snapshot(cwd: Path) -> list[dict]:
-    """Every worktree of the repo containing `cwd`: path, branch, tip, dirty, primary.
+    """Every worktree of the repo containing `cwd`: repo, path, branch, tip, dirty, primary.
 
     `primary` is the main working tree (the first `git worktree list` entry); the
     pause rules never touch it.
@@ -66,15 +80,58 @@ def snapshot(cwd: Path) -> list[dict]:
             block["branch"] = value.removeprefix("refs/heads/")
         elif key == "detached":
             block["branch"] = None
+    repo = rows[0]["path"] if rows else str(Path(cwd).resolve())
     for i, row in enumerate(rows):
         row.setdefault("branch", None)
+        row["repo"] = repo
         row["primary"] = i == 0
-        row["dirty"] = bool(_git(Path(row["path"]), "status", "--porcelain", "--untracked-files=all").strip())
+        row["status"] = _status(Path(row["path"]))
+        row["dirty"] = bool(row["status"])
     return rows
 
 
-def dirty(cwd: Path) -> list[str]:
-    return [r["path"] for r in snapshot(cwd) if r["dirty"]]
+def _owned_rows(repos: list[Path], owned: list[str] | None) -> tuple[list[dict], list[dict]]:
+    """(primaries, owned worktrees) across `repos`.
+
+    With no `owned`, every non-primary worktree counts as the session's. Otherwise only
+    worktrees whose branch name or resolved path is listed; a name matching nothing is an
+    error, because a typo would otherwise record nothing and look like a clean pause.
+    """
+    rows = [r for repo in repos for r in snapshot(repo)]
+    primaries = [r for r in rows if r["primary"]]
+    others = [r for r in rows if not r["primary"]]
+    if owned is None:
+        return primaries, others
+    keys = {o: (o, str(Path(o).expanduser().resolve())) for o in owned}
+    picked = [r for r in others if any(r["branch"] == k[0] or str(Path(r["path"]).resolve()) == k[1] for k in keys.values())]
+    missing = [o for o, k in keys.items()
+               if not any(r["branch"] == k[0] or str(Path(r["path"]).resolve()) == k[1] for r in others)]
+    if missing:
+        raise ValueError("--owned matches no worktree in the given repos: " + ", ".join(missing))
+    return primaries, picked
+
+
+def dirty(cwd: Path | None = None, *, repos: list[Path] | None = None, owned: list[str] | None = None) -> list[str]:
+    """Paths of owned worktrees with uncommitted work. The primary checkout is never listed."""
+    _, rows = _owned_rows(_repo_list(cwd, repos), owned)
+    return [r["path"] for r in rows if r["dirty"]]
+
+
+def _repo_list(cwd: Path | None, repos: list[Path] | None) -> list[Path]:
+    out = list(repos or []) + ([cwd] if cwd is not None else [])
+    if not out:
+        raise ValueError("at least one repo is required")
+    seen, uniq = set(), []
+    for r in out:
+        top = Path(_git(Path(r), "rev-parse", "--path-format=absolute", "--git-common-dir").strip()).parent
+        if top not in seen:
+            seen.add(top)
+            uniq.append(Path(r).resolve())
+    return uniq
+
+
+def _baseline(status: list[str]) -> str:
+    return hashlib.sha256("\n".join(status).encode()).hexdigest()
 
 
 # ---- RESUME.md ----------------------------------------------------------------
@@ -84,6 +141,8 @@ def _yaml_scalar(v) -> str:
         return "null"
     if isinstance(v, bool):
         return "true" if v else "false"
+    if isinstance(v, int):
+        return str(v)
     return json.dumps(str(v))
 
 
@@ -134,24 +193,35 @@ def _now() -> str:
     return datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
 
 
-def write(root: Path, *, session: str, session_id: str, mode: str, cwd: Path, body: str,
+def write(root: Path, *, session: str, session_id: str, mode: str, body: str,
+          cwd: Path | None = None, repos: list[Path] | None = None, owned: list[str] | None = None,
           coordinator: str | None = None, lander: str | None = None) -> Path:
     if mode not in MODES:
         raise ValueError(f"mode must be one of {MODES}, got {mode!r}")
-    cwd = Path(cwd).resolve()
-    bad = dirty(cwd)
+    repo_paths = _repo_list(cwd, repos)
+    primaries, mine = _owned_rows(repo_paths, owned)
+    bad = [r["path"] for r in mine if r["dirty"]]
     if bad:
         raise DirtyWorktree("dirty worktrees, commit (wip(pause): ...) first: " + ", ".join(bad))
+    worktrees = [
+        {"repo": r["repo"], "path": r["path"], "branch": r["branch"], "tip": r["tip"], "primary": True,
+         "baseline_sha": _baseline(r["status"]), "baseline_count": len(r["status"])}
+        for r in primaries
+    ] + [
+        {"repo": r["repo"], "path": r["path"], "branch": r["branch"], "tip": r["tip"], "primary": False}
+        for r in mine
+    ]
     fields = {
         "session": session,
         "session_id": session_id,
         "mode": mode,
         "paused_at": _now(),
         "resumed_at": None,
-        "cwd": str(cwd),
+        "cwd": str(repo_paths[0]),
         "coordinator": coordinator,
         "lander": lander,
-        "worktrees": [{k: r[k] for k in ("path", "branch", "tip", "primary")} for r in snapshot(cwd)],
+        "repos": [{"path": str(p)} for p in repo_paths],
+        "worktrees": worktrees,
     }
     session_dir = Path(root) / session
     session_dir.mkdir(parents=True, exist_ok=True)
@@ -179,27 +249,45 @@ def locate(root: Path, *, session_id: str | None = None, cwd: Path | None = None
                 return path
     if cwd:
         want = str(Path(cwd).resolve())
-        live = [p for p in _candidates(root) if (fm := read_frontmatter(p)).get("cwd") == want and fm.get("resumed_at") is None]
+        def recorded(fm: dict) -> set[str]:
+            return {fm.get("cwd")} | {r["path"] for r in fm.get("repos", [])}
+        live = [p for p in _candidates(root)
+                if want in recorded(fm := read_frontmatter(p)) and fm.get("resumed_at") is None]
         if live:
             return max(live, key=lambda p: read_frontmatter(p)["paused_at"])
     return None
 
 
-def verify(path: Path) -> list[dict]:
-    """Problems that make the recorded state unsafe to continue from. Empty means go."""
+def verify(path: Path, *, warnings: bool = False) -> list[dict]:
+    """Problems that make the recorded state unsafe to continue from. Empty means go.
+
+    Owned worktrees refuse on `missing`, `tip-moved` or `dirty`. The primary checkout
+    never refuses: with `warnings=True` this returns its changes instead
+    (`primary-tip-moved`, `primary-changed`), which the caller reports and continues past.
+    """
     fm = read_frontmatter(path)
-    problems = []
+    problems, notes = [], []
     for rec in fm.get("worktrees", []):
         wt = Path(rec["path"])
+        if rec.get("primary"):
+            if not (wt / ".git").exists():
+                notes.append({**rec, "reason": "primary-missing", "expected": rec["tip"], "actual": None})
+                continue
+            actual = _git(wt, "rev-parse", "HEAD").strip()
+            if actual != rec["tip"]:
+                notes.append({**rec, "reason": "primary-tip-moved", "expected": rec["tip"], "actual": actual})
+            if "baseline_sha" in rec and _baseline(_status(wt)) != rec["baseline_sha"]:
+                notes.append({**rec, "reason": "primary-changed", "expected": rec["tip"], "actual": actual})
+            continue
         if not (wt / ".git").exists():
             problems.append({**rec, "reason": "missing", "expected": rec["tip"], "actual": None})
             continue
         actual = _git(wt, "rev-parse", "HEAD").strip()
         if actual != rec["tip"]:
             problems.append({**rec, "reason": "tip-moved", "expected": rec["tip"], "actual": actual})
-        elif _git(wt, "status", "--porcelain", "--untracked-files=all").strip():
+        elif _status(wt):
             problems.append({**rec, "reason": "dirty", "expected": rec["tip"], "actual": actual})
-    return problems
+    return notes if warnings else problems
 
 
 def mark_resumed(path: Path) -> None:
@@ -215,11 +303,19 @@ def mark_resumed(path: Path) -> None:
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="pause_state.py", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
-    p = sub.add_parser("snapshot"); p.add_argument("--cwd", required=True)
-    p = sub.add_parser("dirty"); p.add_argument("--cwd", required=True)
+
+    def repo_args(p: argparse.ArgumentParser, owned: bool) -> None:
+        p.add_argument("--repo", "--cwd", dest="repos", action="append", required=True,
+                       help="a repo (any of its worktrees) the session worked in; repeat for each")
+        if owned:
+            p.add_argument("--owned", action="append",
+                           help="branch name or worktree path the session owns; repeat. Default: every non-primary worktree")
+
+    p = sub.add_parser("snapshot"); repo_args(p, owned=False)
+    p = sub.add_parser("dirty"); repo_args(p, owned=True)
     p = sub.add_parser("write")
     p.add_argument("--session", required=True); p.add_argument("--session-id", required=True)
-    p.add_argument("--mode", required=True, choices=MODES); p.add_argument("--cwd", required=True)
+    p.add_argument("--mode", required=True, choices=MODES); repo_args(p, owned=True)
     p.add_argument("--body", required=True, help="markdown file with the resume sections")
     p.add_argument("--coordinator"); p.add_argument("--lander")
     p = sub.add_parser("locate"); p.add_argument("--session-id"); p.add_argument("--cwd")
@@ -227,33 +323,37 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("mark-resumed"); p.add_argument("--resume", required=True)
     a = ap.parse_args(argv)
     root = state_root()
+    repos = [Path(r) for r in getattr(a, "repos", None) or []]
 
-    if a.cmd == "snapshot":
-        print(json.dumps(snapshot(Path(a.cwd)), indent=2))
-    elif a.cmd == "dirty":
-        bad = dirty(Path(a.cwd))
-        for p in bad:
-            print(p, file=sys.stderr)
-        return 1 if bad else 0
-    elif a.cmd == "write":
-        try:
-            print(write(root, session=a.session, session_id=a.session_id, mode=a.mode, cwd=Path(a.cwd),
+    try:
+        if a.cmd == "snapshot":
+            rows = [{k: v for k, v in r.items() if k != "status"} for repo in repos for r in snapshot(repo)]
+            print(json.dumps(rows, indent=2))
+        elif a.cmd == "dirty":
+            bad = dirty(repos=repos, owned=a.owned)
+            for p in bad:
+                print(p, file=sys.stderr)
+            return 1 if bad else 0
+        elif a.cmd == "write":
+            print(write(root, session=a.session, session_id=a.session_id, mode=a.mode, repos=repos, owned=a.owned,
                         body=Path(a.body).read_text(encoding="utf-8"), coordinator=a.coordinator, lander=a.lander))
-        except DirtyWorktree as e:
-            print(e, file=sys.stderr)
-            return 1
-    elif a.cmd == "locate":
-        found = locate(root, session_id=a.session_id, cwd=Path(a.cwd) if a.cwd else None)
-        if not found:
-            return 1
-        print(found)
-    elif a.cmd == "verify":
-        problems = verify(Path(a.resume))
-        for p in problems:
-            print(f"{p['reason']}: {p['branch']} at {p['path']} expected {p['expected']} got {p['actual']}", file=sys.stderr)
-        return 2 if problems else 0
-    elif a.cmd == "mark-resumed":
-        mark_resumed(Path(a.resume))
+        elif a.cmd == "locate":
+            found = locate(root, session_id=a.session_id, cwd=Path(a.cwd) if a.cwd else None)
+            if not found:
+                return 1
+            print(found)
+        elif a.cmd == "verify":
+            for w in verify(Path(a.resume), warnings=True):
+                print(f"warning: {w['reason']}: {w['branch']} at {w['path']} recorded {w['expected']} now {w['actual']}", file=sys.stderr)
+            problems = verify(Path(a.resume))
+            for p in problems:
+                print(f"{p['reason']}: {p['branch']} at {p['path']} expected {p['expected']} got {p['actual']}", file=sys.stderr)
+            return 2 if problems else 0
+        elif a.cmd == "mark-resumed":
+            mark_resumed(Path(a.resume))
+    except (DirtyWorktree, ValueError) as e:
+        print(e, file=sys.stderr)
+        return 1
     return 0
 
 

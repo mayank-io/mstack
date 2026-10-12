@@ -13,7 +13,7 @@ Continue exactly where `/dev:safe-pause` stopped, in the recorded order, at the 
 
 1. **Locate.** `PS locate --session-id <id> --cwd <repo>`. The id is `$CLAUDE_SESSION_ID` when set, else the id in this session's scratchpad path. No output and exit 1 means there is no pause state: say so in one line and continue with the normal session resume. Do not invent a state.
 2. **Read** the RESUME.md it prints, frontmatter and body, in full.
-3. **Verify every worktree.** `PS verify --resume <path>`. Exit 0 means every recorded worktree is present, at its recorded tip, and clean. Exit 2 means it is not: stop, repeat the lines it printed naming each worktree and why (`tip-moved`, `dirty`, `missing`), and do not continue. Only MK can decide what to do with a moved tip.
+3. **Verify every worktree.** `PS verify --resume <path>`. Exit 0 means every owned worktree, across every recorded repo, is present, at its recorded tip, and clean. Exit 2 means one is not: stop, repeat the lines it printed naming each worktree and why (`tip-moved`, `dirty`, `missing`), and do not continue. Only MK can decide what to do with a moved tip. Lines starting `warning:` are about a primary checkout (`primary-tip-moved`, `primary-changed`): a lander may have landed other work, or someone left files there. Report them in one line each and continue.
 4. **Re-send the first message** from `## First message`, and only if the frontmatter records a `coordinator`. No coordinator: send nothing to anyone.
 5. **Run the first command** from `## First command`, exactly as written.
 6. **Mark consumed.** `PS mark-resumed --resume <path>` so the session-start hook stops announcing it.
