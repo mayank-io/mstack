@@ -1,0 +1,9 @@
+{
+  "name": "design",
+  "description": "Design and motion workflows. The motion-design skill turns a topic into a finished, deterministic explainer film with sound, captions, and aspect-ratio recompositions.",
+  "author": {
+    "name": "Mayank"
+  },
+  "license": "MIT",
+  "keywords": ["design", "motion-design", "explainer", "video", "animation", "ffmpeg"]
+}

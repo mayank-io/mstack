@@ -17,6 +17,7 @@ Then enable individual plugins:
 /plugin install ccimprove@mstack
 /plugin install company-setup@mstack
 /plugin install think@mstack
+/plugin install design@mstack
 ```
 
 `notes` and `fetch` are a pair — `notes:clip` routes to `fetch:*` for everything it captures, so installing `notes` alone leaves most routes dead.
@@ -49,6 +50,9 @@ Iterative reviews, doc conventions, and feedback loops for serious engineering w
 | `/dev:setup-doc-conventions` | Bootstrap `docs/templates/`, dashboard, Obsidian config, and CLAUDE.md workflow section |
 | `/dev:finish-work-on-local-worktree` | Squash-merge a worktree into main, update doc statuses, refresh the project plan, recommend next work |
 | `/dev:summarize-this-session` | Two-section conversation recap: ongoing task + continuous-improvement insights |
+| `/dev:safe-pause` | Bring the session and its subagents to a resumable stop at a `task` (default), `milestone` or `project` boundary: every worktree committed, nothing pushed, RESUME.md written to `~/.local/state/mk-pause/<session>/` |
+| `/dev:safe-resume` | Continue from a safe-pause: verifies every recorded worktree tip (refuses on a mismatch), re-sends the first message only if a coordinator was recorded, continues in the recorded order. Auto-suggested on `claude --resume`/`--continue` when a pause state exists |
+| `/dev:explain-flows` | Interactive single-page HTML map of the app's workflows, driven by `flows.json` — click a flow to highlight the path through packages/components with per-hop payload annotations. Handles UI/monorepo apps, REST/CLI APIs, and skill/plugin apps |
 | `/dev:safe-pause` | Bring the session and its subagents to a resumable stop at a `task` (default), `milestone` or `project` boundary: every worktree committed, nothing pushed, RESUME.md written to `~/.local/state/mk-pause/<session>/` |
 | `/dev:safe-resume` | Continue from a safe-pause: verifies every recorded worktree tip (refuses on a mismatch), re-sends the first message only if a coordinator was recorded, continues in the recorded order. Auto-suggested on `claude --resume`/`--continue` when a pause state exists |
 
@@ -123,6 +127,12 @@ The layer beneath `notes`. Each skill gets content out of one source and knows n
 
 **Contract.** Every `fetch:*` skill takes `<url-or-path> [output_dir]` — a temp directory when omitted — never writes outside it, and prints `OUTPUT_FILE:<path>` or `OUTPUT_DIR:<path>` as its final stdout line. Chain on that line; never reconstruct the path.
 
+### `design` — design and motion
+
+| Skill | What it does |
+|---|---|
+| `/design:motion-design` | Topic → finished 30–90 s explainer film: 16:9 master, 9:16 and 1:1 recompositions, reduced-motion cut, burned-in captions + `.srt`, from a deterministic `window.seek(t)` HTML source rendered by headless Chrome → ffmpeg. Needs `ffmpeg` and Playwright/Puppeteer |
+
 ## Conventions
 
 - **Skills only — no command wrappers.** A skill is both slash-invocable (`/notes:clip`) and naturally triggered by its description, so it needs no companion command. Until 0.9.0 every skill had a same-named wrapper in `commands/` whose entire body was *"Invoke the `<plugin>:<name>` skill via the Skill tool."* Both registered the same `/plugin:name`, so all 23 appeared **twice** in the slash menu — and the two descriptions drifted apart. Removing them cut the menu from 74 entries to 51 and, because the skill's own description is longer than the wrapper's, made the remaining entries more informative rather than less.
@@ -138,6 +148,7 @@ mstack/
 └── plugins/
     ├── ccimprove/
     ├── company-setup/
+    ├── design/
     ├── dev/
     ├── fetch/
     ├── notes/

@@ -6,7 +6,7 @@
   },
   "metadata": {
     "description": "Mayank's stack of Claude Code plugins for development and continuous improvement workflows",
-    "version": "0.21.0",
+    "version": "0.22.0",
     "pluginRoot": "./plugins"
   },
   "plugins": [
@@ -138,6 +138,24 @@
         "article"
       ],
       "category": "productivity"
+    },
+    {
+      "name": "design",
+      "source": "./plugins/design",
+      "description": "Design and motion workflows. The motion-design skill turns a topic into a finished, deterministic explainer film with sound, captions, and aspect-ratio recompositions.",
+      "author": {
+        "name": "Mayank"
+      },
+      "license": "MIT",
+      "keywords": [
+        "design",
+        "motion-design",
+        "explainer",
+        "video",
+        "animation",
+        "ffmpeg"
+      ],
+      "category": "design"
     }
   ]
 }
