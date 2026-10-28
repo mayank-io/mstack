@@ -39,7 +39,7 @@ The fallback goes to **`fetch:blog-post`**, not `obsidian:defuddle`. `blog-post`
 2. read its OUTPUT_FILE: / OUTPUT_DIR: final line     — Step 2
 3. select ${CLAUDE_PLUGIN_ROOT}/templates/<source>.md, and …/templates/channels/<name>.md if one matches
 4. if the content is a transcript  ──▶  notes:clean-transcript
-5. fill the template
+5. fill the template, plus the vault's type template if the content is one (a recipe → Recipes)   — Step 3.5
 6. notes:create                     (or notes:save-local-file, for PDF)
 ```
 
@@ -196,6 +196,32 @@ const a = document.querySelector('article') || document.body;
 - **Read the images you download.** A chart's content is in the picture; transcribe the figures you rely on and check them against the body text.
 - **This applies even when the body cannot be reproduced.** A paywalled or rights-restricted article still gets its charts archived — the images are frequently the most re-usable part, and they are what makes the note useful later. **Not reproducing the prose is never a reason to skip the images.**
 
+## Step 3.5 — Classify by content type, not by source
+
+**The source template decides the note's shape; the content decides which collection it joins.** A recipe can arrive as a YouTube segment, a NYT Cooking page, a blog post or a LinkedIn post. Each of those routes produces a correctly shaped note that is still invisible to the vault's recipe view if it lacks the recipe category.
+
+Before writing the note, ask what the content *is*, then look for a vault template for that type:
+
+1. List the vault's templates folder (`Templates/` unless the vault's `CLAUDE.md` or `AGENTS.md` names another) and match the content against each `<Type> Template.md`.
+2. **When one matches, the clip carries that template's membership fields on top of the source template's frontmatter:** every `categories:` entry, every `tags:` entry, and every other key the template defines, filled from the source. Keep the source template's own fields and categories (`[[Clippings]]` stays).
+3. Fill what the source states; leave a field empty when it does not. Never guess a rating, cuisine or yield.
+4. Check the base or view that lists the type (`Bases/<Type>.base`, or whatever the template's category links to) to learn which field it filters on, and confirm the note satisfies that filter.
+
+**Recipes** are the case that prompted this rule. Any clip whose content is a recipe (ingredients plus method, whether the whole page or one segment of a longer video) takes the vault's recipe template's fields. In MK Notes that is `Templates/Recipe Template.md`:
+
+| Field | Fill with |
+|---|---|
+| `categories` | add `"[[Recipes]]"` (the filter `Bases/Recipes.base` uses), alongside `"[[Clippings]]"` |
+| `tags` | add `recipes`, plural, spelled as the template spells it |
+| `cuisine` | as stated or plainly implied (American, Modernist, Indian…) |
+| `type` | list: main course, side, sauce, dessert, vegetarian… |
+| `ingredients` | the key ingredients, comma-separated (not the full list; that goes in the body) |
+| `author` | list: the cook or recipe author, not the channel or publisher |
+| `url` | the source URL, with a timestamp for a video segment |
+| `rating` | only when the source publishes one |
+
+Verified 2026-10-28: two recipe clips, a MasterChef segment and a NYT Cooking page, were filed with only `[[Clippings]]` and the tag `recipe` (singular), so `Bases/Recipes.base` listed nothing. A one-letter tag mismatch fails the same silent way a missing category does.
+
 ## Step 4 — Verify before reporting
 
 - Every wikilink resolves to a real file. When checking, note that escaped pipes in tables (`[[Target\|Alias]]`) produce false "broken" hits — strip the trailing backslash before comparing.
@@ -211,6 +237,7 @@ const a = document.querySelector('article') || document.body;
 - For transcripts, confirm the cleaned text is token-identical to the source apart from deliberate removals.
 - **The note contains the source verbatim** (Step 2.6). Check the body, not your intention to have written it: a transcript section that is absent, truncated, or replaced by a summary is a failed clip. Report it as such rather than reporting success.
 - **Analysis is below the source, under its own heading**, and no analytical aside has been interleaved into the transcript.
+- **Content-type membership is set** (Step 3.5). If the content matched a vault type template, the note carries that template's category, tags and fields. For a recipe: `[[Recipes]]` in `categories` and `recipes` in `tags`. After writing from the shell, refresh the app's cache for the file before trusting a base view of it.
 
 ## Step 5 — Report
 
