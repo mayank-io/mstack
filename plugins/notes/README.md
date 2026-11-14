@@ -38,6 +38,7 @@ One flow, one conditional, for every route:
 | Notion site | `fetch:notion-public-site` | `notion.md` |
 | Scribd | `fetch:scribd-document` | `article.md` |
 | arXiv / alphaXiv | `fetch:alphaxiv-paper` | `paper.md` |
+| Tabroom competitor history | `fetch:tabroom-results` | `tabroom.md` |
 | PDF (incl. Drive) | `curl` → `notes:save-local-file` | — |
 | anything else | `fetch:blog-post` | `article.md` |
 

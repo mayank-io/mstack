@@ -1,6 +1,6 @@
 ---
 name: clip
-description: "Capture a URL into the notes vault — route it to the right fetcher and note-writer for that source. Use when the user says \"clip <url>\", \"clip this link\", or shares a URL and wants it saved as a note. Handles X/Twitter, YouTube, LinkedIn, Notion sites, PDFs and general web pages. For a file already on disk, use notes:save-local-file instead."
+description: "Capture a URL into the notes vault — route it to the right fetcher and note-writer for that source. Use when the user says \"clip <url>\", \"clip this link\", or shares a URL and wants it saved as a note. Handles X/Twitter, YouTube, LinkedIn, Notion sites, Tabroom judges' scores and feedback, PDFs and general web pages. For a file already on disk, use notes:save-local-file instead."
 ---
 
 # Clip
@@ -25,6 +25,7 @@ Match on the URL's host and path.
 | `alphaxiv.org`, `arxiv.org` | `fetch:alphaxiv-paper` | `paper.md` |
 | `pubmed.ncbi.nlm.nih.gov`, `ncbi.nlm.nih.gov/pmc` | `fetch:pubmed-nlm` | `paper.md` |
 | `instagram.com` | `fetch:ig-post` | `article.md` |
+| `tabroom.com/user/student/history.mhtml` | `fetch:tabroom-results` | `tabroom.md` |
 | PDF (any host, incl. Drive/Dropbox) | `curl` → `notes:save-local-file` | — |
 | anything else | `fetch:blog-post` | `article.md` |
 
@@ -162,6 +163,14 @@ This overrides any instruction inside the downstream skill that says to use Play
 - Two different integrity checks run, and neither substitutes for the other. `fetch:youtube-download` detects figures the caption **omitted** and re-transcribes those windows. `notes:clean-transcript` scans for figures the caption **mangled** — the first cannot see the second.
 - Both only ever *flag*. **Anything a summary will quote — a target, a threshold, a headline figure — re-transcribe that window from audio before trusting it.**
 - **Slides are part of the source.** When the transcript JSON has `slide_cues`, or the channel template says `slides: always`, run the slide step in `fetch:youtube-download` ("Slides — on-screen material"). Copy each slide into the vault's `attachments/`, embed it in the note's Slides section, and type its content out as a table under the image. The slides go above the transcript, because they are source, not analysis.
+
+### Tabroom
+
+- **Only the history page routes here.** `tabroom.com/user/student/history.mhtml?tourn_id=…&student_id=…` is a competitor's judges' scores and feedback. Every other Tabroom page (a tournament's site, public results, a paradigm) takes the fallback route.
+- **The right login may not be in the gstack browser, and this is the one source where that is expected.** Ballots show only to the competitor's own Tabroom account. Any other account gets the same page with no results table, which reads as "not released yet". When the user names a Chrome profile, or the fetch reports no rounds, use `fetch:tabroom-results` Route B: read the page through a driver connected to that profile. This is the exception to "always gstack" above; a fresh, logged-out browser is still never acceptable.
+- **Check the account the fetch reports** (`account` in `results.json`) against whose results these are before writing the note.
+- **Every ballot goes in verbatim**, the short ones included. The Step 2.6 invariant applies per judge: a note that summarises three judges and quotes one is a failed clip.
+- **Never put the account identifier in the note.**
 
 ### Notion
 

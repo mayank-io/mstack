@@ -47,6 +47,10 @@ ROUTED = [
     # Chromium on a private profile at ~/.claude/x-playwright-profile — a
     # second X login to keep alive, logged out whenever its cookies lapsed.
     "xaccount_iterate.py",
+    # Added 2026-11-13 with Tabroom results. Ballots show only to the account
+    # that owns them; any other session gets the page with no results table,
+    # which reads as "ballots not released".
+    "tabroom_results.py",
 ]
 
 # Scripts that RECEIVE a page rather than opening one. They must never acquire a
