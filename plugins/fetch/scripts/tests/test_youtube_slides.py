@@ -1,7 +1,5 @@
 """Slide extraction from YouTube videos.
 
-Design and boundary semantics: docs/plans/2026-10-10-youtube-slides.md.
-
 Everything except the last test runs on synthetic bytes, with ffmpeg and yt-dlp
 replaced by injected runners. The end-to-end test synthesises a small video with
 ffmpeg's lavfi sources (no fonts needed) and is skipped when ffmpeg is absent.

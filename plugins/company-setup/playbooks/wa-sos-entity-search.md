@@ -42,7 +42,7 @@ The CCFS search API is gated by **both** Cloudflare Turnstile (`cf-turnstile-res
 ## Primary procedure — headed mode via gstack `browse`
 
 ```bash
-B="/Users/mayank/.claude/skills/gstack/browse/dist/browse"
+B="$HOME/.claude/skills/gstack/browse/dist/browse"
 
 # 1. Disconnect any existing headless daemon (idempotent)
 $B disconnect 2>/dev/null

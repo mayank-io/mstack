@@ -1,0 +1,25 @@
+# Text the personal-data scan accepts. Format: <path glob><TAB><regex>.
+# In a file the glob matches, text the regex matches is blanked before scanning.
+# Every entry here is a deliberate, public exposure. Keep the reason beside it.
+
+# The GitHub organisation name, public by definition.
+*	mayank-io
+# Author attribution in manifests and the licence.
+.claude-plugin/marketplace.json	"name": "Mayank"|Mayank's stack
+plugins/*/.claude-plugin/plugin.json	"name": "Mayank"
+LICENSE	Mayank
+# Marketplace owner contact address.
+.claude-plugin/marketplace.json	"email": "[^"]+"
+# The Jaimini karaka code for Matrikaraka.
+plugins/fetch/scripts/chart_to_ascii.py	"MK": "Matrikaraka"|AK AmK BK MK PiK PK GK DK
+plugins/fetch/skills/vedic-chart/SKILL.md	"karaka": "MK"|AK AmK BK MK PiK PK GK DK
+# Invented ids in test fixtures.
+plugins/fetch/scripts/tests/*	[?&](tourn|student)_id=\d+
+# A public office phone number.
+plugins/company-setup/playbooks/wa-sos-entity-search.md	\(360\) 725-0377
+# The upstream author's published contact, kept for attribution.
+plugins/think/README.md	[a-z]+@gmail\.com
+# Third-party reference captures.
+internal/ref/*	[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+
+# The scanner's own tests are made of trigger strings.
+scripts/tests/test_check_personal_data.py	.+

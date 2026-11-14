@@ -1029,7 +1029,7 @@ async def main():
     # lie the caller cannot detect: it chains on the marker, reads a JSON with
     # transcript "", and writes a note with no content.
     #
-    # Real case, 2026-08-24: a pg gyaan video had gone members-only. Every tier
+    # Real case: a video had gone members-only. Every tier
     # failed loudly in stderr, and the script still printed OUTPUT_FILE.
     #
     # The skill contract says an absent marker means STOP — so withhold it.

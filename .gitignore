@@ -17,3 +17,6 @@ __pycache__/
 
 # Git worktrees
 .worktrees/
+
+# Design docs and plans: a separate private repository checked out here
+docs/

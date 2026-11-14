@@ -1,8 +1,8 @@
 # Complete Status: worked example
 
-An invented project ("Ledger import rewrite") owned by one session that also tracks landings. The first block is the full report, sent when MK asks "status?". The second is the event reply sent when a chain finishes. All names, ids, paths and SHAs are made up.
+An invented project ("Ledger import rewrite") owned by one session that also tracks landings. The first block is the full report, sent when the user asks "status?". The second is the event reply sent when a chain finishes. All names, ids, paths and SHAs are made up.
 
-## 1. Full report (MK asked "status?")
+## 1. Full report (the user asked "status?")
 
 **Ledger import rewrite: milestones 1 and 2 landed, milestone 3 is 3 of 5 tasks done, one item waits on you.**
 
@@ -18,7 +18,7 @@ An invented project ("Ledger import rewrite") owned by one session that also tra
 | Detect date drift of up to three days (T32) | import-dev | ✅ landed in chain 15 | |
 | Write correction entries for confirmed mismatches (T33) | import-dev | 🔄 in chain 16, step 3 of 5 (full test suite) | |
 | Report unresolved mismatches as a CSV (T34) | import-dev | ⏳ queued behind chain 16 | land ready since 09:10 PST |
-| Decide the rounding rule for foreign-currency rows (T35) | MK | ⛔ waiting on your review | `/Users/mk/dev/ledger/docs/designs/2026-11-12-fx-rounding-design.md` |
+| Decide the rounding rule for foreign-currency rows (T35) | the user | ⛔ waiting on your review | `/Users/alex/dev/ledger/docs/designs/2026-11-12-fx-rounding-design.md` |
 
 - ⏳ Milestone 4, schedule nightly imports with failure alerts: waits on milestone 3.
 - ⏳ Milestone 5, retire the old import script: waits on milestone 4 running for one week.
@@ -76,7 +76,7 @@ An invented project ("Ledger import rewrite") owned by one session that also tra
 | Item | Why not |
 |---|---|
 | Speed up matching for ledgers over 100k rows (B17) | 🔄 plan review round 2 of 3 still running, no code yet |
-| Decide the rounding rule for foreign-currency rows (T35) | ⛔ design waits on your review: `/Users/mk/dev/ledger/docs/designs/2026-11-12-fx-rounding-design.md` |
+| Decide the rounding rule for foreign-currency rows (T35) | ⛔ design waits on your review: `/Users/alex/dev/ledger/docs/designs/2026-11-12-fx-rounding-design.md` |
 
 **Mains**
 
@@ -85,11 +85,11 @@ An invented project ("Ledger import rewrite") owned by one session that also tra
 | ledger | `e9d2b40` |
 | ledger-docs | `1f6a3c8` |
 
-### Decisions waiting on MK
+### Decisions waiting on the user
 
 | Decision | State | Open this |
 |---|---|---|
-| D7, whether foreign-currency rows round half-even or half-up | ⛔ waiting on you; both options costed in section 4 of the design | `/Users/mk/dev/ledger/docs/designs/2026-11-12-fx-rounding-design.md` |
+| D7, whether foreign-currency rows round half-even or half-up | ⛔ waiting on you; both options costed in section 4 of the design | `/Users/alex/dev/ledger/docs/designs/2026-11-12-fx-rounding-design.md` |
 
 ### Blockers
 
@@ -101,7 +101,7 @@ An invented project ("Ledger import rewrite") owned by one session that also tra
 | D7 rounding rule | ⛔ waiting on you | est. 45 min after your answer | one implementation pass plus one chain |
 | **Total to milestone 3 landed** | | **est. 1 h 35 min after your D7 answer** | chain 16 and T34 run meanwhile; B17 is not on this path |
 
-### Paused on MK's word
+### Paused on the user's word
 
 ⏸ Import from the brokerage API (B9), paused 2026-11-05 until milestone 5 is done. ⏸ Multi-currency ledger support (B11), paused 2026-11-08, no resume date.
 
@@ -123,7 +123,7 @@ Next project: nightly import scheduling with failure alerts (milestone 4).
 | Detect date drift of up to three days (T32) | import-dev | ✅ landed in chain 15 | |
 | Write correction entries for confirmed mismatches (T33) | import-dev | ✅ landed in chain 16 | |
 | Report unresolved mismatches as a CSV (T34) | import-dev | 🔄 in chain 17, step 1 of 5 | |
-| Decide the rounding rule for foreign-currency rows (T35) | MK | ⛔ waiting on your review | `/Users/mk/dev/ledger/docs/designs/2026-11-12-fx-rounding-design.md` |
+| Decide the rounding rule for foreign-currency rows (T35) | the user | ⛔ waiting on your review | `/Users/alex/dev/ledger/docs/designs/2026-11-12-fx-rounding-design.md` |
 
 - ⏳ Milestone 4, schedule nightly imports with failure alerts: waits on milestone 3.
 - ⏳ Milestone 5, retire the old import script: waits on milestone 4 running for one week.
@@ -181,7 +181,7 @@ Next project: nightly import scheduling with failure alerts (milestone 4).
 | Item | Why not |
 |---|---|
 | Speed up matching for ledgers over 100k rows (B17) | 🔄 plan review round 3 of 3 still running, no code yet |
-| Decide the rounding rule for foreign-currency rows (T35) | ⛔ design waits on your review: `/Users/mk/dev/ledger/docs/designs/2026-11-12-fx-rounding-design.md` |
+| Decide the rounding rule for foreign-currency rows (T35) | ⛔ design waits on your review: `/Users/alex/dev/ledger/docs/designs/2026-11-12-fx-rounding-design.md` |
 
 **Mains**
 
@@ -190,10 +190,10 @@ Next project: nightly import scheduling with failure alerts (milestone 4).
 | ledger | `5b7e1d3` |
 | ledger-docs | `1f6a3c8` |
 
-### Waiting on MK
+### Waiting on the user
 
 | Decision | State | Open this |
 |---|---|---|
-| D7, whether foreign-currency rows round half-even or half-up | ⛔ waiting on you; both options costed in section 4 of the design | `/Users/mk/dev/ledger/docs/designs/2026-11-12-fx-rounding-design.md` |
+| D7, whether foreign-currency rows round half-even or half-up | ⛔ waiting on you; both options costed in section 4 of the design | `/Users/alex/dev/ledger/docs/designs/2026-11-12-fx-rounding-design.md` |
 
 Next project: nightly import scheduling with failure alerts (milestone 4).

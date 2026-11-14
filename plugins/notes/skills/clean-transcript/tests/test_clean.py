@@ -1,7 +1,5 @@
 """Tests for the deterministic transcript cleaner.
 
-Spec: docs/plans/2026-08-24-orchestrator-collapse.md §11.
-
 The load-bearing test is test_verbatim_invariant. Everything else guards a
 boundary that has produced a real bad capture at some point.
 """

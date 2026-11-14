@@ -13,8 +13,8 @@ Produce the complete status of the **whole project this session owns**. The read
 
 | Trigger | What to send |
 |---|---|
-| MK asks: "status", "status?", "complete status", "full status" | The full report, sections 1 to 8 below. |
-| Any change the session reports (a landing, a red chain, a review result, a new blocker, a decision made) | The event reply: one-line headline of what changed, then sections 1 to 3 in full (and section 4 if the session lands or tracks landings), any row that waits on MK, then the `Next project:` line. Never the event alone. |
+| The user asks: "status", "status?", "complete status", "full status" | The full report, sections 1 to 8 below. |
+| Any change the session reports (a landing, a red chain, a review result, a new blocker, a decision made) | The event reply: one-line headline of what changed, then sections 1 to 3 in full (and section 4 if the session lands or tracks landings), any row that waits on the user, then the `Next project:` line. Never the event alone. |
 
 Scope is the project, never the event. A reply about one landing still shows every milestone and the whole backlog.
 
@@ -66,7 +66,7 @@ Always the **full** set, every time. Never a delta, never "unchanged", never "sa
 
 A part with nothing in it keeps its header and a single row saying `none`.
 
-### 5. Decisions waiting on MK
+### 5. Decisions waiting on the user
 
 One table, placed after the results the decisions depend on. `Decision | State | Open this`. The Decision cell is the id plus what is being decided: "D83, how to run the 11 exit readings", never "D83".
 
@@ -74,9 +74,9 @@ One table, placed after the results the decisions depend on. `Decision | State |
 
 `Blocker | State | Time remaining (est.) | Hinges on`, then a **Total** row. Every figure is an estimate and is labelled as one. Say what each hinges on, and build it from observed pace, not hope: the number of plan review rounds still to run, about 35 minutes per landing chain, about 10 minutes per regeneration, unless this project has measured a different pace, in which case use that and say so.
 
-### 7. Paused on MK's word
+### 7. Paused on the user's word
 
-Items MK has paused that are not in the current stream, in one row or one paragraph, each with `⏸`. They are listed every time so nothing drops out of view.
+Items the user has paused that are not in the current stream, in one row or one paragraph, each with `⏸`. They are listed every time so nothing drops out of view.
 
 ### 8. Next project
 
@@ -91,13 +91,13 @@ The last line of every report and every event reply, exactly one line: `Next pro
    | ✅ | landed / done |
    | 🔄 | in progress |
    | ⏳ | queued, or waiting on another item |
-   | ⛔ | waiting on MK |
+   | ⛔ | waiting on the user |
    | ⏸ | paused |
    | ❌ | failed / red |
 
 2. **Never the word "green".** Say what happened: "landed", "passed", "tests pass", "clean".
 3. **Full task names, never bare ids.** The Item cell says what the task does in plain words, with the id in brackets after: "Regenerate the exit readings with the new scorer (B41)". The same for decisions, milestones, chains and issues.
-4. **Every row that waits on MK (⛔) names what to open, in the row.** The file to review as a full absolute path, and the same for any URL, doc or page MK must open. "See the plan" is not a path.
+4. **Every row that waits on the user (⛔) names what to open, in the row.** The file to review as a full absolute path, and the same for any URL, doc or page the user must open. "See the plan" is not a path.
 5. **Times carry a zone.** Local zone of the user, named.
 
 ## Before sending: check
@@ -110,7 +110,7 @@ The last line of every report and every event reply, exactly one line: `Next pro
 - Every ⛔ row carries a full path or URL.
 - Landing parts (if this session lands or tracks landings) are complete tables, with SHAs read just now.
 - Every blocker has an estimate labelled as an estimate, what it hinges on, and there is a total.
-- Paused-on-MK's-word items are listed.
+- Paused-on-the-user's-word items are listed.
 - The last line is `Next project: …`.
 
 ## Red flags: stop, this is not a complete status
@@ -119,7 +119,7 @@ The last line of every report and every event reply, exactly one line: `Next pro
 - "The landing table is unchanged since last time" → print it in full anyway.
 - "I remember where that agent got to" → read its last result.
 - "The backlog row is stale but I know the truth" → fix the row, then report.
-- "MK knows what D83 is" → write what it decides.
+- "The user knows what D83 is" → write what it decides.
 - "The file is in the usual place" → write the full path in the row.
 - "It should take about an hour" → label it an estimate and say what it hinges on.
 

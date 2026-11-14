@@ -4,7 +4,7 @@
 # 2. No "version" field in plugin.json (caching uses commit hashes)
 # 3. If any plugins/** file changes, marketplace.json version must be bumped
 #    in the same commit (else consumer autoUpdate won't fire).
-# 4. No hardcoded personal paths in staged plugin files.
+# 4. No personal data in any staged file (scripts/check_personal_data.py).
 #
 # Install:  scripts/install-hooks.sh
 
@@ -99,34 +99,12 @@ if [ -n "$plugin_changes" ]; then
   fi
 fi
 
-# === Check 4: No personal data in staged plugin files ===
+# === Check 4: No personal data in staged files ===
 #
-# Catches accidental re-introduction of hardcoded personal paths into
-# distributed plugins. Add patterns specific to your environment here.
+# scripts/check_personal_data.py scans every staged file (not only plugins/:
+# the whole repository is public) for private terms, personal patterns and
+# per-user config paths. See its docstring for the rules and the allow file.
 
-if [ -n "$plugin_changes" ]; then
-  personal_data_errors=""
-
-  while IFS= read -r staged_file; do
-    content=$(git show ":$staged_file" 2>/dev/null) || continue
-
-    # Generic: iCloud Obsidian vault path
-    if echo "$content" | grep -q "iCloud~md~obsidian"; then
-      personal_data_errors="${personal_data_errors}  - $staged_file: contains iCloud~md~obsidian path"$'\n'
-    fi
-
-    # Generic: hardcoded /Users/<owner>/Library or Developer paths
-    if echo "$content" | grep -qE "/Users/[^/]+/(Library|Developer)/"; then
-      personal_data_errors="${personal_data_errors}  - $staged_file: contains hardcoded /Users/<owner>/ path"$'\n'
-    fi
-  done <<< "$plugin_changes"
-
-  if [ -n "$personal_data_errors" ]; then
-    echo "ERROR: Personal data detected in staged plugin files:"
-    printf "%s" "$personal_data_errors"
-    echo "Remove personal paths before committing."
-    exit 1
-  fi
-fi
+python3 "$REPO_ROOT/scripts/check_personal_data.py" --staged
 
 exit 0

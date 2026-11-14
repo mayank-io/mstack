@@ -33,6 +33,7 @@ Analyze your Claude Code usage and turn one-off work into reusable patterns.
 | `/ccimprove:surface-usage-patterns` | Scan all sessions in `~/.claude/projects/` and surface candidates for skills, plugins, agents, and CLAUDE.md additions |
 | `/ccimprove:make-repeatable` | Analyze the current conversation and recommend whether to codify it as a skill or a plugin, then build it |
 | `/ccimprove:clean-permissions` | Prune one-off pastes, redundant entries, and dead MCP refs from `~/.claude/settings.json` |
+| `/ccimprove:setup-config` | Create `~/.mstack/` from the defaults each installed mstack plugin ships in its `config-defaults/` directory. Never overwrites a file that exists |
 
 Ships a hook that runs automatically: **`claude plugin update` leaves the old commit-sha directory in the cache**, and that directory stays *loaded* — every stale copy contributes its skills to the slash menu again. Three copies of `/fetch:x-post` appeared this way. The hook prunes any cache directory no longer referenced by `installed_plugins.json`, on `PostToolUse/Bash` when the update runs through Claude and on `SessionStart` (throttled hourly) for updates made via `/plugin` or a plain terminal. Run it by hand with `python3 plugins/ccimprove/scripts/prune_plugin_cache.py --dry-run`.
 
@@ -45,7 +46,7 @@ Iterative reviews, doc conventions, and feedback loops for serious engineering w
 | `/dev:code-review-iterative` | Up to 4 review-fix iterations with 3 parallel reviewer agents (PE, Sr SDE, QA), diminishing fix thresholds |
 | `/dev:design-review-iterative` | Same shape, applied to design documents (PE, Sr SDE, Domain Expert) |
 | `/dev:ml-design-review-iterative` | ML-specific variant (Principal ML Engineer, Sr Applied Scientist, ML Ops Engineer) |
-| `/dev:apply-feedback` | Apply tagged comments (`[MK]`, `[REV]`, etc.) in the current document immediately, no questions asked |
+| `/dev:apply-feedback` | Apply tagged comments (`[REV]`, `[EXT]`, etc.) in the current document immediately, no questions asked |
 | `/dev:review-feedback` | Same input, but plan-then-apply with approval gate |
 | `/dev:setup-doc-conventions` | Bootstrap `docs/templates/`, dashboard, Obsidian config, and CLAUDE.md workflow section |
 | `/dev:finish-work-on-local-worktree` | Squash-merge a worktree into main, update doc statuses, refresh the project plan, recommend next work |
@@ -65,13 +66,13 @@ Bundled assets:
 
 #### Configuration: feedback tags
 
-`apply-feedback` and `review-feedback` look for tagged comments (e.g., `[MK]`, `[REV]`) in the current document. The set of tags and how each one should be interpreted is configured per user at:
+`apply-feedback` and `review-feedback` look for tagged comments (e.g., `[REV]`, `[EXT]`) in the current document. The set of tags and how each one should be interpreted is configured per user at:
 
 ```
 ~/.mstack/dev/feedback-tags.json
 ```
 
-The file is **auto-created on first run** with a default `MK` entry. To add, modify, or delete tags, edit this file directly. Changes are picked up on the next skill invocation — no restart required.
+The file is **auto-created on first run** from the plugin's `config-defaults/feedback-tags.json`, which holds one `REV` entry. To add, modify, or delete tags, edit this file directly. Changes are picked up on the next skill invocation — no restart required.
 
 Schema:
 
@@ -79,13 +80,13 @@ Schema:
 {
   "tags": [
     {
-      "tag": "MK",
-      "from": "Document author (initials = MK for Mayank)",
+      "tag": "REV",
+      "from": "Document author",
       "content": "Direct edit instructions, factual corrections, rephrasing requests",
       "action": "Apply edits as written; treat as imperative; only push back if ambiguous"
     },
     {
-      "tag": "REV",
+      "tag": "EXT",
       "from": "External reviewer",
       "content": "Suggestions, open questions, alternative phrasings",
       "action": "Treat as suggestions; flag for discussion before applying"
@@ -139,7 +140,7 @@ The layer beneath `notes`. Each skill gets content out of one source and knows n
 
 - **Skills only — no command wrappers.** A skill is both slash-invocable (`/notes:clip`) and naturally triggered by its description, so it needs no companion command. Until 0.9.0 every skill had a same-named wrapper in `commands/` whose entire body was *"Invoke the `<plugin>:<name>` skill via the Skill tool."* Both registered the same `/plugin:name`, so all 23 appeared **twice** in the slash menu — and the two descriptions drifted apart. Removing them cut the menu from 74 entries to 51 and, because the skill's own description is longer than the wrapper's, made the remaining entries more informative rather than less.
 - **No Claude attribution in commits.** See `~/.claude/CLAUDE.md`.
-- **Docs live elsewhere.** Design docs and implementation plans for this marketplace live in the sibling repo `mstack-docs/`, not in this repo.
+- **Docs live elsewhere.** Design docs and implementation plans for this marketplace are kept in a private repository, not in this repo. `docs/` is gitignored here.
 
 ## Layout
 

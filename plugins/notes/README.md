@@ -24,7 +24,7 @@ One flow, one conditional, for every route:
 ```
 1. route on host        ──▶  fetch:<source>          (curl, for PDF)
 2. read its OUTPUT_FILE: / OUTPUT_DIR: final line
-3. select templates/<source>.md  + templates/channels/<name>.md if one matches
+3. select templates/<source>.md  + ~/.mstack/notes/channels/<name>.md if one matches
 4. if the content is a transcript  ──▶  notes:clean-transcript
 5. fill the template
 6. notes:create                    (or notes:save-local-file, for PDF)
@@ -62,7 +62,7 @@ The three recipes were three copies of *"read fetch output, fill a shape, call c
 
 **The boundary that keeps this design from decaying.** A template may carry declarative settings — channel match patterns, a Whisper model, a language, frontmatter fields, required tags. If one starts saying *"then run X, then check Y"*, it has outgrown the format and that logic belongs in `clip` or a `fetch:*` skill.
 
-Nothing lints this. `templates/channels/pg-gyaan.md` is already 213 lines and specifies tool settings; it stays a template because it never sequences a call. A channel template **overrides** its source template entirely — it does not merge.
+Nothing lints this. A channel template can run past 200 lines and specify tool settings; it stays a template because it never sequences a call. Channel templates are per-user config in `~/.mstack/notes/channels/`; `config-defaults/channels/example.md` shows the format and `/ccimprove:setup-config` seeds it. A channel template **overrides** its source template entirely — it does not merge.
 
 ### The layer split
 

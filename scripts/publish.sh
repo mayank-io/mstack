@@ -5,6 +5,11 @@
 # 3. Push to origin
 # 4. Print the two manual Claude Code steps that must follow
 #
+# Before any of that it refuses to run unless the pre-commit hook is installed,
+# the whole tree passes scripts/check_personal_data.py, and
+# scripts/privacy-review.sh passes (PRIVACY_REVIEWED=1 skips that review once
+# you have read its findings).
+#
 # Usage:
 #   scripts/publish.sh                   # patch bump, stage nothing extra
 #   scripts/publish.sh minor
@@ -33,6 +38,22 @@ if ! git diff --quiet && [ -z "$(git diff --cached --name-only)" ]; then
   git status --short
   exit 1
 fi
+
+# The pre-commit hook must be this repo's hook: hooks are per clone, and a
+# clone without it commits past every check below.
+hook_path="$(git rev-parse --git-path hooks/pre-commit)"
+if [ ! "$hook_path" -ef "$REPO_ROOT/scripts/pre-commit-hook.sh" ]; then
+  echo "ERROR: $hook_path is not scripts/pre-commit-hook.sh. Run scripts/install-hooks.sh, then re-run." >&2
+  exit 1
+fi
+
+# Whole-tree personal-data scan. The hook sees only staged files; this sees
+# everything the push will make public.
+python3 "$REPO_ROOT/scripts/check_personal_data.py" --all
+
+# Model privacy review of everything staged: what the text lets a reader infer,
+# and personal project names no term list knows yet. Runs once per publish.
+"$REPO_ROOT/scripts/privacy-review.sh"
 
 # Read and bump version
 current=$(jq -r '.metadata.version' "$MARKETPLACE_JSON")

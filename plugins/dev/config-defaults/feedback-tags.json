@@ -1,0 +1,10 @@
+{
+  "tags": [
+    {
+      "tag": "REV",
+      "from": "Document author",
+      "content": "Direct edit instructions, factual corrections, rephrasing requests, structural changes",
+      "action": "Apply edits as written; treat as imperative; only push back if ambiguous"
+    }
+  ]
+}

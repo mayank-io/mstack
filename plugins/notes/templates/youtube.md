@@ -4,7 +4,7 @@ Output shape for a YouTube video note. Selected by `notes:clip` for any `youtube
 
 ## Channel Matching
 
-Used when no template in `channels/` matches the video's channel. A channel template overrides this one entirely — it does not merge with it.
+Used when no template in `~/.mstack/notes/channels/` matches the video's channel (format: `config-defaults/channels/example.md` in this plugin). A channel template overrides this one entirely — it does not merge with it.
 
 ## Settings
 

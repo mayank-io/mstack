@@ -86,7 +86,7 @@ Follow the call path in code, hop by hop. Each step is one hop between two nodes
           "to": "api",
           "kind": "http",
           "label": "POST /api/invites",
-          "payload": { "name": "InviteRequest", "example": { "email": "a@b.co", "role": "member" } },
+          "payload": { "name": "InviteRequest", "example": { "email": "a@example.com", "role": "member" } },
           "async": false,
           "source": "apps/web/src/members/invite.ts:42",
           "confidence": "traced",

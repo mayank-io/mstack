@@ -59,9 +59,38 @@ It also enforces:
 - Every directory under `plugins/` is registered in `marketplace.json`.
 - No `version` field appears in any per-plugin `plugin.json` (caching is
   keyed by commit SHA — a per-plugin version would be misleading).
-- No hardcoded personal paths (e.g., `iCloud~md~obsidian`,
-  `/Users/<owner>/...`) sneak into distributed plugins. Extend the pattern
-  list in the hook as needed.
+- No personal data in any staged file, via `scripts/check_personal_data.py`
+  (see below).
+
+## Personal-data checks
+
+This repository is public, so four checks stand between a personal detail and
+a push:
+
+| Check | Runs | Catches |
+|---|---|---|
+| `scripts/check_personal_data.py --staged` | pre-commit hook | private terms, home paths, emails, phone numbers, ids in URLs, per-user config files |
+| `scripts/check_personal_data.py --all` | `publish.sh`, before the commit | the same rules over every tracked file |
+| `scripts/privacy-review.sh` | `publish.sh`, before the commit | a model review of the staged diff: what the text lets a reader infer, and personal project names no list knows yet |
+| `.github/workflows/personal-data.yml` | every push | the pattern rules only, for commits made without the hook |
+
+**Private terms** live outside the repo in `~/.mstack/private-terms.txt`: one
+term per line, `cs:` for case-sensitive, `dirs:<directory>` to make every
+subdirectory name a term (a new project is covered once its directory exists),
+`not:<term>` to drop one. A missing or empty terms file fails the check; it
+never passes.
+
+**Accepting an exposure** is explicit: add `<path glob><TAB><regex>` to
+`scripts/personal-data-allow.txt` with the reason above it, or put
+`personal-data-ok: <reason>` on the line.
+
+**The model review** blocks the publish on findings. After reading them, publish
+as is with `PRIVACY_REVIEWED=1 scripts/publish.sh`. `publish.sh` also refuses to
+run when `.git/hooks/pre-commit` is not this repo's hook.
+
+**Per-user config never ships.** Each plugin reads its user config from
+`~/.mstack/<plugin>/` and ships only neutral starting files in its
+`config-defaults/` directory; `/ccimprove:setup-config` copies them into place.
 
 ## One-time setup (fresh clone)
 

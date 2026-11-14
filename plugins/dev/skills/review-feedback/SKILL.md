@@ -1,68 +1,55 @@
 ---
 name: review-feedback
-description: "Review tagged comments (e.g. [MK], [REV]) in the current document, present a plan, and apply after approval. Uses per-tag interpretation rules from `~/.mstack/dev/feedback-tags.json`. Use when the user says \"review feedback\", \"review MK comments\", \"plan the feedback\", or wants a plan-then-apply flow for tagged review notes in a document."
+description: "Review tagged comments (e.g. [REV], [EXT]) in the current document, present a plan, and apply after approval. Uses per-tag interpretation rules from `~/.mstack/dev/feedback-tags.json`. Use when the user says \"review feedback\", \"review REV comments\", \"plan the feedback\", or wants a plan-then-apply flow for tagged review notes in a document."
 ---
 
-You are reviewing a document that contains feedback comments tagged with one or more configured prefixes (e.g., `[MK]`, `[REV]`). Tags and their interpretation rules are configured per-user in `~/.mstack/dev/feedback-tags.json`.
+You are reviewing a document that contains feedback comments tagged with one or more configured prefixes (e.g., `[REV]`, `[EXT]`). Tags and their interpretation rules are configured per-user in `~/.mstack/dev/feedback-tags.json`.
 
 ## Step 0: Load feedback tag configuration
 
-Run this bash to check for the config file:
+Run this bash. It seeds the config from the plugin's default on first run, then prints it:
 
 ```bash
-mkdir -p ~/.mstack/dev
-CONFIG=~/.mstack/dev/feedback-tags.json
-if [ -f "$CONFIG" ] && [ -s "$CONFIG" ]; then
-  cat "$CONFIG"
-else
-  echo "MISSING"
+set -euo pipefail
+CONFIG="${HOME:?HOME unset}/.mstack/dev/feedback-tags.json"
+DEFAULT="${CLAUDE_PLUGIN_ROOT:?CLAUDE_PLUGIN_ROOT unset}/config-defaults/feedback-tags.json"
+if [ ! -s "$CONFIG" ]; then
+  mkdir -p "$(dirname "$CONFIG")"
+  cp "$DEFAULT" "$CONFIG"
+  echo "SEEDED"
 fi
+cat "$CONFIG"
 ```
 
-### If output is `MISSING` (first run)
+### If the first line is `SEEDED` (first run)
 
-1. Create the file with the default `MK` entry. Use the Write tool to write `~/.mstack/dev/feedback-tags.json` with this content:
+1. Tell the user verbatim:
 
-   ```json
-   {
-     "tags": [
-       {
-         "tag": "MK",
-         "from": "Document author (initials = MK for Mayank)",
-         "content": "Direct edit instructions, factual corrections, rephrasing requests, structural changes",
-         "action": "Apply edits as written; treat as imperative; only push back if ambiguous"
-       }
-     ]
-   }
-   ```
+   > Saved your feedback tag config to `~/.mstack/dev/feedback-tags.json`. Pre-seeded with `REV` as the default. **Edit this file directly to add, modify, or delete tags later.**
 
-2. Tell the user verbatim:
-
-   > Saved your feedback tag config to `~/.mstack/dev/feedback-tags.json`. Pre-seeded with `MK` as the default. **Edit this file directly to add, modify, or delete tags later.**
-
-3. Use AskUserQuestion: "Want to add another tag now? You can also add more later by editing the file." with options:
-   - A) No, continue with MK
+2. Use AskUserQuestion: "Want to add another tag now? You can also add more later by editing the file." with options:
+   - A) No, continue with REV
    - B) Yes, add another tag
 
-4. **If the user picks B**, ask 4 questions in sequence (one AskUserQuestion call each, free-text answers):
-   - "What tag prefix? (short uppercase letters only — e.g., REV, FB, TODO. Will be matched case-insensitively in documents.)"
+3. **If the user picks B**, ask 4 questions in sequence (one AskUserQuestion call each, free-text answers):
+   - "What tag prefix? (short uppercase letters only — e.g., EXT, FB, TODO. Will be matched case-insensitively in documents.)"
    - "Who are these comments from? (e.g., 'External reviewer')"
    - "What do these comments typically contain? (e.g., 'Suggestions and open questions')"
    - "What action should I take with these comments? (e.g., 'Treat as suggestions; flag for discussion before applying')"
 
    Read the current config, append the new tag object to the `tags` array, write the updated file. Then ask "Add another?" again — loop until user says no.
 
-5. Proceed to Step 1 once setup completes.
+4. Proceed to Step 1 once setup completes.
 
-### If output is valid JSON
+### Otherwise
 
-Parse it. Build a list of all configured tags from the `tags` array. Each tag has fields `tag`, `from`, `content`, `action`.
+Parse the JSON. Build a list of all configured tags from the `tags` array. Each tag has fields `tag`, `from`, `content`, `action`.
 
-If JSON is malformed, warn the user (e.g., "feedback-tags.json is invalid JSON, falling back to default MK tag for this run"), then use the default `MK` tag with the same defaults as the first-run pre-seed.
+If JSON is malformed, warn the user (e.g., "feedback-tags.json is invalid JSON, falling back to the plugin default for this run"), then use the tags in `${CLAUDE_PLUGIN_ROOT}/config-defaults/feedback-tags.json`.
 
 ## Step 1: Locate all configured tag comments in the document
 
-For each tag from the loaded config, search the document case-insensitively for the bracketed pattern. For example, if tags `MK` and `REV` are configured, search for `[MK]`, `[mk]`, `[Mk]`, `[REV]`, `[rev]`, `[Rev]`, etc.
+For each tag from the loaded config, search the document case-insensitively for the bracketed pattern. For example, if tags `REV` and `EXT` are configured, search for `[REV]`, `[rev]`, `[Rev]`, `[EXT]`, `[ext]`, `[Ext]`, etc.
 
 Use the Grep tool with the `-i` flag, or `grep -i "\[mk\]"` style commands. Aggregate matches across all configured tags.
 
@@ -82,9 +69,9 @@ Group comments by tag. Present like this:
 ```
 ## Feedback Review Plan
 
-### Tag `[MK]` (from: Document author — apply as written)
+### Tag `[REV]` (from: Document author — apply as written)
 
-#### Comment 1 (Line X): [MK comment text]
+#### Comment 1 (Line X): [REV comment text]
 **Proposed Change**:
 
 [Show the ACTUAL content that will be added/changed, not a description]

@@ -9,7 +9,7 @@ Route a URL to the correct extraction skill and note-writer. **This skill is a r
 
 ## Input
 
-The user provided: `$ARGUMENTS` — a URL, optionally followed by extra instructions (e.g. "tag it to project X", "capture with the edge-idea tag"). **Pass extra instructions through to the downstream skill and honour them after it returns.**
+The user provided: `$ARGUMENTS` — a URL, optionally followed by extra instructions (e.g. "tag it to project X", "capture with the reading-list tag"). **Pass extra instructions through to the downstream skill and honour them after it returns.**
 
 ## Step 1 — Identify the source
 
@@ -35,10 +35,12 @@ The fallback goes to **`fetch:blog-post`**, not `obsidian:defuddle`. `blog-post`
 
 **Templates live at the plugin root — `${CLAUDE_PLUGIN_ROOT}/templates/` — not beside this skill.** There is no `skills/clip/templates/`; a path resolved relative to this file finds nothing.
 
+**Channel templates are the user's own config and live outside the plugin, in `~/.mstack/notes/channels/*.md`.** Read each file's Channel Matching section against the video's channel name. `${CLAUDE_PLUGIN_ROOT}/config-defaults/channels/example.md` shows the format; `ccimprove:setup-config` seeds it. A missing or empty directory means no channel overrides, not an error.
+
 ```
 1. route on host        ──▶  fetch:<source>          (curl, for PDF)
 2. read its OUTPUT_FILE: / OUTPUT_DIR: final line     — Step 2
-3. select ${CLAUDE_PLUGIN_ROOT}/templates/<source>.md, and …/templates/channels/<name>.md if one matches
+3. select ${CLAUDE_PLUGIN_ROOT}/templates/<source>.md, and ~/.mstack/notes/channels/<name>.md if one matches
 4. if the content is a transcript  ──▶  notes:clean-transcript
 5. fill the template, plus the vault's type template if the content is one (a recipe → Recipes)   — Step 3.5
 6. notes:create                     (or notes:save-local-file, for PDF)
@@ -122,7 +124,7 @@ This is a routing-level guarantee, not a matter of shape — shape lives in `tem
 
 **Gate, enforced in Step 4:** if the note does not contain the source verbatim, do not report the clip as done. Say what failed to extract and why. **An honest "extraction failed" is worth more than a note that looks finished.**
 
-If the source genuinely has no reproducible body — a paywalled article, a video with captions disabled and audio unavailable — say that in the note, in place of the transcript, and set the reading fields accordingly. **Do not silently substitute your summary for the thing you could not get.**
+If the source genuinely has no reproducible body — an article whose body could not be extracted, a video with captions disabled and audio unavailable — say that in the note, in place of the transcript, and set the reading fields accordingly. **Do not silently substitute your summary for the thing you could not get.**
 
 🔴 **Capture everything you *can* get, though.** A body you cannot reproduce does not make the rest of the page unavailable: **harvest the images, the headline, deck, byline, date, chart source lines and every figure cited**, and say explicitly in the note which single part is missing and why. Degrading the whole clip because one component is restricted is the failure mode to avoid.
 
@@ -132,7 +134,7 @@ These are non-negotiable and exist because each one has already caused a bad cap
 
 ### All browser-based sources (X, LinkedIn)
 
-**Use gstack browse, never a fresh Playwright session.** The user is logged into their accounts there; a fresh Playwright session hits login walls and silently returns logged-out content.
+**Use gstack browse, never a fresh Playwright session.** These sites show a post in full only to a signed-in reader, and gstack browse is the user's own signed-in browser. A fresh session gets the signed-out page, and nothing reports the difference.
 
 ```bash
 B="$HOME/.claude/skills/gstack/browse/dist/browse"
@@ -203,11 +205,11 @@ const a = document.querySelector('article') || document.body;
 - **Take the widest `srcset` variant**, not `img.src`. News sites ship 5+ widths of the same asset; `src` is usually the smallest. Publisher chart URLs often encode the width (`…_300px.jpg` … `…_700px.jpg`) — take the largest.
 - **Download to the vault's `attachments/`, embed with a relative path, and verify the file exists** (Step 4 already requires this).
 - **Read the images you download.** A chart's content is in the picture; transcribe the figures you rely on and check them against the body text.
-- **This applies even when the body cannot be reproduced.** A paywalled or rights-restricted article still gets its charts archived — the images are frequently the most re-usable part, and they are what makes the note useful later. **Not reproducing the prose is never a reason to skip the images.**
+- **This applies even when the body cannot be reproduced.** A page whose text could not be extracted still gets the images that loaded archived, and the note says which part is missing.
 
 ## Step 3.5 — Classify by content type, not by source
 
-**The source template decides the note's shape; the content decides which collection it joins.** A recipe can arrive as a YouTube segment, a NYT Cooking page, a blog post or a LinkedIn post. Each of those routes produces a correctly shaped note that is still invisible to the vault's recipe view if it lacks the recipe category.
+**The source template decides the note's shape; the content decides which collection it joins.** A recipe can arrive as a YouTube segment, a recipe site, a blog post or a LinkedIn post. Each of those routes produces a correctly shaped note that is still invisible to the vault's recipe view if it lacks the recipe category.
 
 Before writing the note, ask what the content *is*, then look for a vault template for that type:
 
@@ -216,11 +218,11 @@ Before writing the note, ask what the content *is*, then look for a vault templa
 3. Fill what the source states; leave a field empty when it does not. Never guess a rating, cuisine or yield.
 4. Check the base or view that lists the type (`Bases/<Type>.base`, or whatever the template's category links to) to learn which field it filters on, and confirm the note satisfies that filter.
 
-**Recipes** are the case that prompted this rule. Any clip whose content is a recipe (ingredients plus method, whether the whole page or one segment of a longer video) takes the vault's recipe template's fields. In MK Notes that is `Templates/Recipe Template.md`:
+**Recipes** are the worked example. Any clip whose content is a recipe (ingredients plus method, whether the whole page or one segment of a longer video) takes the vault's recipe template's fields. A recipe template typically defines:
 
 | Field | Fill with |
 |---|---|
-| `categories` | add `"[[Recipes]]"` (the filter `Bases/Recipes.base` uses), alongside `"[[Clippings]]"` |
+| `categories` | add `"[[Recipes]]"` (the field the vault's recipes view filters on), alongside `"[[Clippings]]"` |
 | `tags` | add `recipes`, plural, spelled as the template spells it |
 | `cuisine` | as stated or plainly implied (American, Modernist, Indian…) |
 | `type` | list: main course, side, sauce, dessert, vegetarian… |
@@ -229,7 +231,7 @@ Before writing the note, ask what the content *is*, then look for a vault templa
 | `url` | the source URL, with a timestamp for a video segment |
 | `rating` | only when the source publishes one |
 
-Verified 2026-10-28: two recipe clips, a MasterChef segment and a NYT Cooking page, were filed with only `[[Clippings]]` and the tag `recipe` (singular), so `Bases/Recipes.base` listed nothing. A one-letter tag mismatch fails the same silent way a missing category does.
+A one-letter tag mismatch (`recipe` for `recipes`) fails the same silent way a missing category does: the base lists nothing.
 
 ## Step 4 — Verify before reporting
 

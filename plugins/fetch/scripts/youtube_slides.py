@@ -7,8 +7,8 @@ script downloads the video, samples small grey frames at a fixed interval,
 keeps the frames that look like slides, and exports the most complete copy of
 each distinct slide at source resolution.
 
-Three properties of real videos decide the design (measured on a Chariot
-Palmistry video; docs/plans/2026-10-10-youtube-slides.md §5):
+Three properties of real videos decide the design (measured on a real
+lecture video):
 
 - Slides are flat. On a 160x90 grey thumbnail, the most common of 16 luminance
   bins covers 0.64-0.94 of a slide frame and 0.28-0.34 of a talking head.

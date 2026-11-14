@@ -32,7 +32,7 @@ Additionally:
 ## Environment setup
 
 ```bash
-B="/Users/mayank/.claude/skills/gstack/browse/dist/browse"
+B="$HOME/.claude/skills/gstack/browse/dist/browse"
 
 # Open USPTO in a dedicated tab and record the tab id
 $B newtab "https://tmsearch.uspto.gov/"
@@ -101,7 +101,7 @@ history, or filing dates beyond live/dead.
 ## Worked example: search "solidus"
 
 ```bash
-B="/Users/mayank/.claude/skills/gstack/browse/dist/browse"
+B="$HOME/.claude/skills/gstack/browse/dist/browse"
 
 # 1. Open in own tab
 $B newtab "https://tmsearch.uspto.gov/"
