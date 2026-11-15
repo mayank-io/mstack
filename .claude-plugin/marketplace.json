@@ -6,7 +6,7 @@
   },
   "metadata": {
     "description": "Mayank's stack of Claude Code plugins for development and continuous improvement workflows",
-    "version": "0.25.0",
+    "version": "0.26.0",
     "pluginRoot": "./plugins"
   },
   "plugins": [
@@ -156,6 +156,26 @@
         "ffmpeg"
       ],
       "category": "design"
+    },
+    {
+      "name": "sd",
+      "source": "./plugins/sd",
+      "description": "Speech and debate: analyse a Tabroom speech event's results from the tournament's public data — every ballot, the prelim seeding, who broke and why.",
+      "author": {
+        "name": "Mayank"
+      },
+      "license": "MIT",
+      "keywords": [
+        "speech",
+        "debate",
+        "tabroom",
+        "results",
+        "break",
+        "ballots",
+        "forensics",
+        "nsda"
+      ],
+      "category": "productivity"
     }
   ]
 }

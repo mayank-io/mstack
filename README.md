@@ -130,6 +130,12 @@ The layer beneath `notes`. Each skill gets content out of one source and knows n
 
 **Contract.** Every `fetch:*` skill takes `<url-or-path> [output_dir]` — a temp directory when omitted — never writes outside it, and prints `OUTPUT_FILE:<path>` or `OUTPUT_DIR:<path>` as its final stdout line. Chain on that line; never reconstruct the path.
 
+### `sd` — speech and debate
+
+| Skill | What it does |
+|---|---|
+| `sd:analyze-event-results` | A Tabroom speech event's ballots, prelim seeding and break, from the tournament's public data: any tournament link or name in; data files and a break analysis out, with totals checked against Tabroom's own |
+
 ### `design` — design and motion
 
 | Skill | What it does |

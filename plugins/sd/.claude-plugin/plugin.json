@@ -1,0 +1,18 @@
+{
+  "name": "sd",
+  "description": "Speech and debate: analyse a Tabroom speech event's results from the tournament's public data — every ballot, the prelim seeding, who broke and why.",
+  "author": {
+    "name": "Mayank"
+  },
+  "license": "MIT",
+  "keywords": [
+    "speech",
+    "debate",
+    "tabroom",
+    "results",
+    "break",
+    "ballots",
+    "forensics",
+    "nsda"
+  ]
+}
