@@ -15,8 +15,8 @@ The data comes from Tabroom's documented backup endpoint, `/api/download_data.mh
 
 - **The tournament** (required), as either:
   - any Tabroom URL that carries `tourn_id`: a round's results, Final Places, Prelim Seeds, or the Invite, Entries, Judges, Pairings, Live Updates or Results tab;
-  - the tournament's name. The script looks it up with Tabroom's search. An exact name that repeats every year resolves to the latest one that has started; a loose name with several matches fails and lists them.
-- **The event** (`--event`): its name or abbreviation ("Novice Oratory", `NOO`).
+  - the tournament's name. The script looks it up with Tabroom's search. An exact name that repeats every year resolves to the latest one that has started; a loose name with several matches fails and lists them. The `tournament:` line on stderr gives the dates of the one chosen: when the user named a month or year, check it against that line, and if it is the wrong year pass that year's tournament URL instead.
+- **The event** (`--event`): its name or abbreviation ("Novice Oratory", `NOO`). Pass it whenever the user names the event.
 - **A competitor** (`--competitor`, optional): the entry the user is asking about. Part of the name is enough.
 - **An output directory** (optional): omitted, a temp directory is used.
 
@@ -32,7 +32,7 @@ If the question is about a person ("why didn't she break") and no name is given,
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/tabroom_event_results.py" "<url or tournament name>" [out_dir] [--event "<name>"] [--competitor "<name>"]
 ```
 
-Run it through the Bash tool **outside the sandbox**: it needs the network, and for a `result_id` link the gstack browser. Run it from the user's working directory, not from the plugin's.
+Run it through the Bash tool **outside the sandbox**: it needs the network, and for a `result_id` link the gstack browser. Run it from the user's working directory, not from the plugin's: the gstack browser keeps one daemon per directory, and starting it from another directory closes the user's signed-in window. An existing output directory is reused and its files overwritten.
 
 To re-run on an earlier download (another event or competitor, no network):
 
@@ -62,7 +62,7 @@ When the question is about a competitor, state, in this order:
 1. Where the competitor seeded, the size of the break, and who held the last place in.
 2. Which tiebreaker separated them from the cut, with both values. For a competitor who broke: their seed and final place.
 3. Which single rank, one place better, would have been enough, from the "one rank better" table.
-4. What the data cannot show: ballot comments are visible only to the competitor's own login (`fetch:tabroom-results` reads them).
+4. Anything in "Data and checks", and what the data cannot show: ballot comments are visible only to the competitor's own login (`fetch:tabroom-results` reads them).
 
 When the question is about the event as a whole (no `--competitor`), state, in this order:
 
@@ -92,7 +92,7 @@ Each stderr `WARNING:` changes what can be claimed:
 
 - **Speech events with ranks and points.** A debate, congress or worlds event is refused: those are decided on wins and losses.
 - **"Broke" means "has a ballot in the first elimination round."** With no elimination round scored, there is no break to read.
-- **The one-rank-better table swaps two ranks in one room and keeps the judges' points.** It shows what the arithmetic needed, not what a judge would have done.
+- **The one-rank-better table has a row only for a prelim rank below 1st, swaps two ranks in one room, and keeps the judges' points.** It shows what the arithmetic needed, not what a judge would have done.
 - **Entries level on every tiebreaker** are listed alphabetically; the analysis names them.
 - **Public data only.** A tournament that hides its results returns none, and the script says so.
 - The data holds students' names. Keep the output where the user asked for it and send none of it to outside services.
