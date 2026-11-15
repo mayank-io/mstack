@@ -522,6 +522,39 @@ def test_main_reports_a_tournament_with_no_data(tmp_path, capsys):
     assert "returned no tournament data for tourn_id 1" in capsys.readouterr().err
 
 
+def test_cells_that_start_like_a_formula_are_written_as_text(tmp_path):
+    data = tournament()
+    for r in data["categories"][0]["events"][0]["rounds"]:
+        for s in r["sections"]:
+            for b in s["ballots"]:
+                if b["entry_name"] == "Hal Dove":
+                    b["entry_name"], b["judge_first"] = "=HYPERLINK(1)", "@Blake"
+    out = tmp_path / "out"
+    assert ter.main(["https://www.tabroom.com/index/tourn/main.mhtml?tourn_id=900", str(out), "--event", "NTO"],
+                    get=Web(data).get, page_abbr=no_browser) == 0
+    ballots = list(csv.DictReader((out / "ballots.csv").open(encoding="utf-8")))
+    assert {b["name"] for b in ballots if "HYPERLINK" in b["name"]} == {"'=HYPERLINK(1)"}
+    assert "'@Blake South" in {b["judge"] for b in ballots}
+    assert not any(v[:1] in "=+-@" for b in ballots for v in b.values() if v)
+    names = [r["name"] for r in csv.DictReader((out / "standings.csv").open(encoding="utf-8"))]
+    assert "'=HYPERLINK(1)" in names and "=HYPERLINK(1)" not in names
+
+
+def test_a_tournament_id_that_is_not_a_number_is_refused(tmp_path, capsys):
+    data = tournament()
+    data["id"] = "../../evil"
+    assert ter.main(["https://www.tabroom.com/index/tourn/main.mhtml?tourn_id=900", str(tmp_path / "out"), "--event", "NTO"],
+                    get=Web(data).get, page_abbr=no_browser) == 1
+    assert "no numeric id" in capsys.readouterr().err
+    assert not (tmp_path / "out").exists()
+
+
+def test_main_says_how_the_event_was_chosen(tmp_path, capsys):
+    url = "https://www.tabroom.com/index/tourn/results/round_results.mhtml?tourn_id=900&round_id=13"
+    assert ter.main([url, str(tmp_path / "out")], get=Web().get, page_abbr=no_browser) == 0
+    assert "event: Novice Test Oratory (NTO), from the link's round_id" in capsys.readouterr().err
+
+
 def test_main_from_raw_with_no_file_fails(tmp_path, capsys):
     assert ter.main(["--from-raw", str(tmp_path)], get=no_browser, page_abbr=no_browser) == 1
     assert "no tournament_*.json" in capsys.readouterr().err

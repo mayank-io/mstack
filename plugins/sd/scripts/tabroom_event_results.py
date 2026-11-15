@@ -167,6 +167,9 @@ def parse_tournament_data(text, tourn_id=""):
     if not isinstance(data, dict) or "categories" not in data:
         raise ResultsError(f"Tabroom returned no tournament data for tourn_id {tourn_id}".rstrip()
                            + "; the tournament may be hidden or the id wrong")
+    if not str(data.get("id") or "").isdigit():
+        # The id names the raw file; anything but digits is not a tournament id.
+        raise ResultsError("the tournament data carries no numeric id")
     return data
 
 
@@ -231,20 +234,22 @@ def resolve_event(data, start, event=None, competitor=None, page_abbr=None):
     `result_id` page; it is passed in so that nothing here opens a browser."""
     events = list_events(data)
     speech = [e for e in events if e.get("type") == "speech" and scored_rounds(e)]
-    chosen = None
+    chosen, how = None, ""
     if start.get("event_id"):
-        chosen = next((e for e in events if str(e["id"]) == start["event_id"]), None)
+        chosen, how = next((e for e in events if str(e["id"]) == start["event_id"]), None), "the link's event_id"
     if not chosen and start.get("round_id"):
         chosen = next((e for e in events if any(str(r["id"]) == start["round_id"] for r in e.get("rounds", []))), None)
+        how = "the link's round_id"
     if not chosen and event:
-        chosen = pick_event(events, event)
+        chosen, how = pick_event(events, event), "--event"
     if not chosen and start.get("result_id") and page_abbr:
         abbr = page_abbr(start["url"])
         chosen = next((e for e in events if abbr and e["abbr"].casefold() == abbr.casefold()), None)
+        how = "the results page the link points at, read in the browser"
     if not chosen and competitor:
         entered = events_with_competitor(speech, competitor)
         if len(entered) == 1:
-            chosen = entered[0]
+            chosen, how = entered[0], "the one speech event the competitor is in"
         elif entered:
             raise ResultsError(f"\"{competitor}\" is entered in {len(entered)} speech events; name one with --event: "
                                + describe_events(entered))
@@ -255,6 +260,7 @@ def resolve_event(data, start, event=None, competitor=None, page_abbr=None):
     if chosen.get("type") != "speech":
         raise ResultsError(f"{chosen['name']} is a {chosen.get('type')} event; this script handles speech events "
                            "(ranks and points), not win/loss events")
+    print(f"event: {chosen['name']} ({chosen['abbr']}), from {how}", file=sys.stderr)
     return chosen
 
 
@@ -786,6 +792,14 @@ def render_analysis(event, standings, check, competitor=None, simulation=None):
     return "\n".join(out)
 
 
+def csv_safe(row):
+    """Names, codes, schools and judges come from Tabroom as typed by users. A
+    cell that starts like a formula is prefixed with a quote, so a spreadsheet
+    opens it as text."""
+    return {k: ("'" + v if isinstance(v, str) and v[:1] in ("=", "+", "-", "@", "\t", "\r") else v)
+            for k, v in row.items()}
+
+
 def ballot_rows(event):
     return [{"round": r["label"], "stage": r["stage"], **b} for r in event["rounds"] for b in r["ballots"]]
 
@@ -819,7 +833,7 @@ def write_outputs(event, standings, check, analysis, out_dir, source):
         cols = ["round", "stage", "section", "room", "order", "entry", "code", "name", "school", "judge", "rank", "points"]
         w = csv.DictWriter(f, fieldnames=cols)
         w.writeheader()
-        w.writerows(ballots)
+        w.writerows(csv_safe(b) for b in ballots)
     with open(os.path.join(out_dir, "standings.csv"), "w", encoding="utf-8", newline="") as f:
         cols = (["seed", "name", "school", "code"]
                 + [f"{r['key']}_{x}" for r in prelims for x in ("rank", "points")]
@@ -840,7 +854,7 @@ def write_outputs(event, standings, check, analysis, out_dir, source):
                 row[f"{r['key']}_points"] = "/".join(num(p["points"]) for p in mine)
             for r in elims:
                 row[f"{r['key']}_ranks"] = "/".join(str(x) for x in e["elim"].get(r["key"], []))
-            w.writerow(row)
+            w.writerow(csv_safe(row))
     with open(os.path.join(out_dir, "analysis.md"), "w", encoding="utf-8") as f:
         f.write(analysis)
 

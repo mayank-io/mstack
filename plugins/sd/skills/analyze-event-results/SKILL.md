@@ -7,7 +7,7 @@ description: "Use when the user shares a tabroom.com tournament link (a results 
 
 One script downloads a Tabroom tournament's public data and writes one speech event's ballots, standings and a break analysis to a directory. **Run it; do not open the result pages, parse them, or rank entries by hand.** Its totals and seeds are checked against Tabroom's own, and a hand-built ranking has no such check.
 
-The data comes from Tabroom's documented backup endpoint, `/api/download_data.mhtml?tourn_id=<n>`: one plain GET, no login, the whole tournament as JSON. Never crawl the result pages instead; they need a login and Tabroom asks automated readers to stay off them.
+The data comes from Tabroom's documented backup endpoint, `/api/download_data.mhtml?tourn_id=<n>`: one plain GET, no login, the whole tournament as JSON. Never crawl the result pages for data instead; they need a login and Tabroom asks automated readers to stay off them. The script opens a result page in exactly one case, described under Input: to read which event a `result_id` link belongs to, one page, in the user's own signed-in browser.
 
 ## Input
 
@@ -40,13 +40,13 @@ To re-run on an earlier download (another event or competitor, no network):
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/tabroom_event_results.py" --from-raw "<earlier out_dir>" [out_dir] --event "<name>" [--competitor "<name>"]
 ```
 
-**Output contract:** the final stdout line is `OUTPUT_DIR:<abs path>`. No marker means failure; stop and report the `ERROR:` line. One case writes the data and still fails: a `--competitor` that matches no entry, or several. The error lists the matches; re-run with `--from-raw` and a name from `standings.csv`.
+**Output contract:** the final stdout line is `OUTPUT_DIR:<abs path>`, and it is the only line on stdout. Everything else goes to stderr: `tournament:` (which tournament a name search resolved to), `event:` (which event was chosen and from what), `NOTE:`, `WARNING:`, a one-line count summary, and `ERROR:`. No marker means failure; stop and report the `ERROR:` line. One case writes the data and still fails: a `--competitor` that matches no entry, or several. The error lists the matches; re-run with `--from-raw` and a name from `standings.csv`.
 
 ## What it writes
 
 | File | Contents |
 |---|---|
-| `analysis.md` | Numbered sections: objective, key findings, how the break worked, the competitor's rooms, what one rank better would have changed, who broke, judge point scales, data and checks |
+| `analysis.md` | Numbered sections: objective, key findings, how the break worked, who broke, judge point scales, data and checks. With `--competitor`, two more after "how the break worked": the competitor's rooms, and what one rank better would have changed |
 | `standings.csv` | One row per entry in prelim seed order: ranks and points by round, rank total, reciprocals, points, 1sts, whether they broke, elimination ranks, final place, Tabroom's own seed |
 | `ballots.csv`, `ballots.json` | One row per ballot: round, stage, section, room, speaking order, entry, code, name, school, judge, rank, points |
 | `event.json` | Tournament, dates in its own timezone, event, rounds, tiebreakers as Tabroom names them, break size, the check result, `captured_utc` |
@@ -55,12 +55,21 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/tabroom_event_results.py" --from-raw "<ea
 
 ## Report
 
-Answer the user's question from `analysis.md`, leading with its Key findings. State, in this order:
+Answer the user's question from `analysis.md`, leading with its Key findings. Say which tournament and event were analysed, from the `tournament:` and `event:` lines.
+
+When the question is about a competitor, state, in this order:
 
 1. Where the competitor seeded, the size of the break, and who held the last place in.
 2. Which tiebreaker separated them from the cut, with both values. For a competitor who broke: their seed and final place.
 3. Which single rank, one place better, would have been enough, from the "one rank better" table.
 4. What the data cannot show: ballot comments are visible only to the competitor's own login (`fetch:tabroom-results` reads them).
+
+When the question is about the event as a whole (no `--competitor`), state, in this order:
+
+1. The size of the break out of how many entries, and who held the last place in, with their ranks and totals.
+2. The first entry out, and which tiebreaker separated them from the cut.
+3. What the entries that broke had in common, from "Who broke", and the final places.
+4. Anything in "Data and checks".
 
 Then give the output directory. When the user wants the analysis kept, hand `analysis.md` and the directory to their note-writing skill; this skill writes no notes.
 
@@ -89,6 +98,8 @@ Each stderr `WARNING:` changes what can be claimed:
 - The data holds students' names. Keep the output where the user asked for it and send none of it to outside services.
 
 ## Tests
+
+From a checkout of the mstack repository (the tests are not part of an installed plugin):
 
 ```bash
 uv run --group dev pytest plugins/sd/scripts/tests/ -v
