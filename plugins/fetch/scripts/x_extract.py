@@ -7,6 +7,8 @@ Snowflake clustering via the tested x_threads). It has NO knowledge of profile
 timelines or iteration — that is the x-account layer's job, which calls this.
 """
 import os
+import re
+import sys
 import time
 
 from x_snowflake import id_sort_key
@@ -46,6 +48,8 @@ def _normalize(d, handle, status_id):
         # None when the post has no video. Dropping this here is what made
         # every video post extract as a caption with no content behind it.
         "video": d.get("video") or None,
+        # True while X is still showing this post cut at "Show more".
+        "truncated": bool(d.get("truncated")),
     }
 
 
@@ -85,13 +89,23 @@ def collect_thread_posts(page, handle, root_id, scrolls=14):
     stable = 0
     for _ in range(scrolls):
         _ensure(page)
+        # Expand the cut posts in view BEFORE reading them. Without this every
+        # long reply in a thread is captured as its first ~280 characters.
+        expanded = page.evaluate("(h) => window.__xExtract.expandShowMore(h)", handle) or {}
+        if expanded.get("clicked"):
+            time.sleep(0.8)
         for pd in (page.evaluate("(h) => window.__xExtract.extractAllByAuthor(h)", handle) or []):
             sid = pd.get("statusId")
             if not sid or not (pd.get("content") or "").strip():
                 continue
             if sid not in collected:
                 collected[sid] = pd
-            elif pd.get("video") and not collected[sid].get("video"):
+                continue
+            if collected[sid].get("truncated") and _is_fuller(pd, collected[sid]):
+                # A sighting taken before the expansion landed holds the cut
+                # text; a later, fuller one replaces it.
+                collected[sid].update(content=pd["content"], truncated=pd.get("truncated"))
+            if pd.get("video") and not collected[sid].get("video"):
                 # First sighting wins for text, but a sighting taken before the
                 # player mounted must not lock in "this post has no video".
                 collected[sid]["video"] = pd["video"]
@@ -118,13 +132,78 @@ def collect_thread_posts(page, handle, root_id, scrolls=14):
     return posts
 
 
+def _is_fuller(new, old):
+    """Is `new` a better reading of the same post's text than `old`?"""
+    if not new.get("truncated"):
+        return True
+    return len(new.get("content") or "") > len(old.get("content") or "")
+
+
+def read_truncated_from_status_pages(page, handle, posts, pause=1.5):
+    """Re-read each still-cut post as the focal post of its own status page,
+    where X renders it in full. Mutates and returns `posts`.
+
+    This is the fallback for a post the in-place expansion did not open (the
+    control was a link, or the click did not land). It navigates, so the page
+    is left on the last post read. A post that cannot be read in full keeps
+    `truncated: True` — the caller reports it; it is never passed off as whole.
+    """
+    for post in posts:
+        if not post["truncated"]:
+            continue
+        sid = post["status_id"]
+        try:
+            page.goto(f"https://x.com/{handle}/status/{sid}", timeout=45000)
+            page.wait_for_selector("article", timeout=15000)
+            time.sleep(pause)
+            _ensure(page)
+            d = page.evaluate("(s) => window.__xExtract.extractById(s)", sid) or {}
+        except RuntimeError as exc:     # BrowseError: timeout, navigation failure
+            print(f"could not re-read {sid} from its status page: {exc}", file=sys.stderr)
+            continue
+        if d.get("error") or not _is_fuller(d, post):
+            continue
+        post["content"] = d.get("content") or post["content"]
+        post["truncated"] = bool(d.get("truncated"))
+    return posts
+
+
+_URL_TAIL = re.compile(r"(?:https?://|\w\.\w+/)\S*$")
+_COUNTER_TAIL = re.compile(r"\d+\s*/\s*(?:\d+|N)$", re.IGNORECASE)
+
+
+def ends_mid_sentence(content, min_length=240):
+    """Does a long post stop where a sentence would not?
+
+    The backstop for the day X renames the "Show more" control: `truncated`
+    would then be False on every cut post, and the cut text (about 280
+    characters, ending on a bare word or a comma) is all that is left to go on.
+    It is a hint, not a finding — a post can end without punctuation — so
+    short posts, and endings that are a link, a hashtag, a mention or a thread
+    counter, are not flagged.
+    """
+    text = (content or "").rstrip()
+    if len(text) < min_length:
+        return False
+    last_word = text.split()[-1]
+    if last_word[0] in "#@$" or _URL_TAIL.search(text) or _COUNTER_TAIL.search(text):
+        return False
+    return text[-1].isalnum() or text[-1] in ",…"
+
+
+def _finish(page, handle, posts):
+    if any(p["truncated"] for p in posts):
+        read_truncated_from_status_pages(page, handle, posts)
+    return posts
+
+
 def extract_thread_here(page, handle, focal_id):
     """The page is ALREADY ON the post (e.g. opened in a new tab). Walk to the
     root and extract the whole thread. Returns {root_id, is_thread, posts}."""
     _ensure(page)
     wait_for_media(page)
     root_id = find_root(page, focal_id, handle)
-    posts = collect_thread_posts(page, handle, root_id)
+    posts = _finish(page, handle, collect_thread_posts(page, handle, root_id))
     return {"root_id": root_id, "is_thread": len(posts) > 1, "posts": posts}
 
 
@@ -140,5 +219,5 @@ def extract_thread(page, handle, focal_id):
         page.wait_for_selector("article", timeout=15000)
         time.sleep(1.2)
     wait_for_media(page)
-    posts = collect_thread_posts(page, handle, root_id)
+    posts = _finish(page, handle, collect_thread_posts(page, handle, root_id))
     return {"root_id": root_id, "is_thread": len(posts) > 1, "posts": posts}

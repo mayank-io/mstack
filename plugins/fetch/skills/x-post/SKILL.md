@@ -76,6 +76,14 @@ What it writes, under `<out_dir>`:
 
 **Output contract:** the **final stdout line** is `OUTPUT_FILE:<absolute path to the note>`. Progress goes to stderr. On failure the script exits non-zero and emits **no** `OUTPUT_FILE:` marker — a marker on a failed capture would send the caller off to summarise a note that was never written. Chain on that last line; do not guess the filename from the slug.
 
+**Long posts.** Outside its own status page X shows a post longer than about 280 characters cut, with a "Show more" button after the text, so every long reply in a thread arrives as its opening lines. The script clicks that button before reading each post, and re-reads from the post's own status page any post the click did not open. What it still could not read in full is never passed off as whole:
+
+| Signal | Where | Meaning |
+|---|---|---|
+| `TRUNCATED_POST:<status_url>` | **stderr**, one line per post | The post is still cut. The note marks it `> **Incomplete:**` and carries `incomplete_posts: <n>` in frontmatter. |
+| exit code `4`, no `OUTPUT_FILE:` | — | One or more posts are cut. The note was written (its path is in the `ERROR:` line) but it is not a capture of the thread; do not summarise it as one. Re-run, and if it repeats, read the listed posts by hand. |
+| `POSSIBLY_TRUNCATED:<status_url>` | **stderr**, exit code unchanged | No "Show more" button was found, but a post of 240+ characters stops on a bare word or a comma. Open the post and compare before trusting the note. |
+
 ## Step 1.5 — Video posts
 
 **A video post captured as its caption alone is not a capture.** The caption is the hook; the video is the content. This is the `notes:clip` Step 2.6 invariant — reproduce the source, then summarise it — applied to X, and it is the rule the earlier video clippings in the vault break by carrying a "not transcribed here" callout where the body should be.
@@ -211,6 +219,7 @@ Every one of these was a real, silently-wrong capture. They now live in code, no
 
 | Failure mode | Handled in | Why it is not obvious |
 |---|---|---|
+| **Posts cut at "Show more"** — a long post is shown whole only on its own status page; in a thread view each one is its first ~280 characters | `extraction.js` `expandShowMore` / `showMoreOf`, `x_extract.read_truncated_from_status_pages`; exit 4 in `xpost_download.main` | The cut text is ordinary prose, so a 12-post thread with ten cut posts reads as a complete note |
 | **Thread virtualization** — articles unmount as they scroll out of the viewport, so a single pass after scrolling sees only the last screenful | `x_extract.collect_thread_posts` — unions same-author posts on **every** tick and stops when the union stops growing, not when the visible count stops changing | The capture succeeds and returns the tail of the thread |
 | **Mid-thread links** — a shared link is frequently NOT the first post; people copy a middle or final post | `extraction.js findRoot()` reads the ancestor articles X renders ABOVE the focal one; `xpost_download.download_url` re-navigates to the root before capturing | Extracting from the focal post yields a coherent-looking note that starts at post 7/7 |
 | **Same author ≠ same thread** — the author's replies to commenters render under the same handle | `x_threads.cluster` + `x_snowflake.same_thread` (30-minute Snowflake gap), plus `isReplyToOther` from `extraction.js` | The false positives are real posts by the right author; only the timestamp gap distinguishes them |
@@ -292,7 +301,7 @@ The wait cannot live in page JS — `$B js` returns before a promise resolves, s
 xpost_download.download_open_post(page, handle, out_dir, day, download_media=True)
 ```
 
-It returns `{note, fname, status_id, root_id, is_thread, post_count, media, author_name, date, member_ids}`, or `{"error": ...}`. `page` must be a **sync**-shaped page — `_browse.sync_browse_page()` gives you one over gstack. This is the seam the x-account bulk harvester uses: `scripts/xaccount_iterate.py <handle> <out_dir> <max_posts>` runs in the same gstack browser (headed-mode guarantee included), scrolls a profile, opens each post in a new tab, hands the tab to `download_open_post`, then closes it and returns to the profile tab. It exits 3 without opening any tab if the gstack browser is not logged in to X. Use this skill's CLI for single posts.
+It returns `{note, fname, status_id, root_id, is_thread, post_count, media, author_name, date, member_ids, truncated_ids, suspect_ids}`, or `{"error": ...}`. A non-empty `truncated_ids` means the note is incomplete (see Step 1, "Long posts"). Reading a cut post in full can navigate, so the page may be left on a different post of the thread. `page` must be a **sync**-shaped page — `_browse.sync_browse_page()` gives you one over gstack. This is the seam the x-account bulk harvester uses: `scripts/xaccount_iterate.py <handle> <out_dir> <max_posts>` runs in the same gstack browser (headed-mode guarantee included), scrolls a profile, opens each post in a new tab, hands the tab to `download_open_post`, then closes it and returns to the profile tab. It exits 3 without opening any tab if the gstack browser is not logged in to X. Use this skill's CLI for single posts.
 
 ## Tips
 

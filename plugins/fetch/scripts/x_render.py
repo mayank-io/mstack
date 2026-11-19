@@ -103,6 +103,10 @@ def _video_lines(video) -> list:
     return lines
 
 
+INCOMPLETE_MARKER = ('> **Incomplete:** X cut this post at "Show more" '
+                     'and the full text was not captured.')
+
+
 def render_note(post: dict) -> str:
     """Render the full Markdown note (YAML frontmatter + body) for a single
     X post or thread. Emits zero vault syntax (no wikilinks, no daily-note
@@ -138,6 +142,9 @@ def render_note(post: dict) -> str:
         f"views: {views}",
         f"media: {media}",
     ]
+    if post.get("incomplete_posts"):
+        # Absent on a complete capture; present, it is the count of cut posts.
+        lines.append(f"incomplete_posts: {post['incomplete_posts']}")
     lines += _video_lines(post.get("video"))
     if post.get("harvest_run"):
         lines.append(f"harvest_run: {post['harvest_run']}")
@@ -151,10 +158,14 @@ def render_note(post: dict) -> str:
         for i, section in enumerate(sections, start=1):
             # inline n/N marker (how threads read on X); no empty ## headers
             lines.append(f"**{i}/{n}** {section['content']}".rstrip())
+            if section.get("truncated"):
+                lines += ["", INCOMPLETE_MARKER]
             lines += _image_lines(section.get("image_files"))
             lines.append("")
     else:
         lines.append(post["content"])
+        if post.get("truncated"):
+            lines += ["", INCOMPLETE_MARKER]
         lines += _image_lines(post.get("image_files"))
         lines.append("")
 

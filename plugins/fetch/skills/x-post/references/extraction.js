@@ -119,6 +119,49 @@
       Array.from(h.querySelectorAll('img')).some((i) => i.src && i.src.includes('pbs.twimg.com')));
   }
 
+  // A post longer than ~280 characters is rendered IN FULL only as the focal
+  // post of its own status page. Everywhere else in a conversation (every
+  // reply in a thread, when the page is on the root) X cuts the text and puts
+  // a "Show more" control after it. The cut text is ordinary prose that ends
+  // mid-sentence, so a thread captured from one page reads as complete while
+  // most of each post is missing. This control is the only signal.
+  //
+  // Measured 2026-11-15 on a 12-post thread: the control is a <button> that is
+  // a SIBLING after tweetText (not inside it), and clicking it expands the post
+  // in place (276 -> 1,831 characters) without navigating.
+  //
+  // A quote card carries its own tweetText and its own control. Only a control
+  // between this post's text and the quoted text belongs to this post.
+  const SHOW_MORE = '[data-testid="tweet-text-show-more-link"]';
+  const FOLLOWING = 4, PRECEDING = 2;   // Node.DOCUMENT_POSITION_*
+
+  function showMoreOf(article) {
+    const texts = article.querySelectorAll('[data-testid="tweetText"]');
+    const own = texts[0], quoted = texts[1];
+    if (!own) return null;
+    for (const el of article.querySelectorAll(SHOW_MORE)) {
+      const afterOwn = own.compareDocumentPosition(el) & FOLLOWING;
+      const beforeQuoted = !quoted || (quoted.compareDocumentPosition(el) & PRECEDING);
+      if (afterOwn && beforeQuoted) return el;
+    }
+    return null;
+  }
+
+  // Expand every cut post by `handle` in the current DOM. Only a <button> is
+  // clicked: an <a> would navigate away from the conversation, and those posts
+  // are left for the caller to read from their own status page. The expansion
+  // is not synchronous; the caller waits before extracting.
+  function expandShowMore(handle) {
+    let clicked = 0, links = 0;
+    for (const article of document.querySelectorAll('article')) {
+      if (handleOf(article).toLowerCase() !== handle.toLowerCase()) continue;
+      const el = showMoreOf(article);
+      if (!el) continue;
+      if (el.tagName === 'BUTTON') { el.click(); clicked++; } else links++;
+    }
+    return { clicked, links };
+  }
+
   // Extract one <article> node's full data (author, text, time, metrics, images).
   function extractArticle(article) {
     let handle = '';
@@ -164,7 +207,18 @@
     const video = extractVideo(article);
 
     return { statusId: statusIdOf(article), handle, displayName, content, timestamp, metrics,
-             expectedImageCount: photoLinks.length, images, video };
+             expectedImageCount: photoLinks.length, images, video,
+             truncated: !!showMoreOf(article) };
+  }
+
+  // Extract the article whose OWN status id is `statusId`. On a reply's status
+  // page the ancestors render above it, so extractFocal() (the first article)
+  // returns the thread root, not the post the page is for.
+  function extractById(statusId) {
+    for (const article of document.querySelectorAll('article')) {
+      if (statusIdOf(article) === statusId) return extractArticle(article);
+    }
+    return { error: 'No article with status id ' + statusId };
   }
 
   // Step 2 — extract the focal (first) article on the current page.
@@ -268,7 +322,8 @@
     };
   }
 
-  window.__xExtract = { extractFocal, extractArticle, extractAllByAuthor,
+  window.__xExtract = { extractFocal, extractArticle, extractAllByAuthor, extractById,
+                        showMoreOf, expandShowMore,
                         findRoot, detectThreadMembers, extractLongform,
                         imagesReady, statusIdOf, handleOf,
                         extractVideo, parseVideoDuration, mediaReady };

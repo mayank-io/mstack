@@ -33,6 +33,8 @@ import x_snowflake
 from x_render import render_note, slugify, note_filename
 from x_media import media_filename
 
+EXIT_INCOMPLETE = 4   # a note was written, but one or more posts are cut
+
 _STATUS_URL = re.compile(
     r"^https?://(?:www\.)?(?:x|twitter)\.com/([A-Za-z0-9_]{1,15})/status/(\d+)")
 
@@ -74,7 +76,19 @@ def download_open_post(page, handle, out_dir, day, download_media=True):
     for pst in th["posts"]:
         imgs = _download_media(pst["images"], att_dir, handle, pst["status_id"]) if download_media else []
         media += len(imgs)
-        sections.append({"content": pst["content"], "image_files": imgs})
+        sections.append({"content": pst["content"], "image_files": imgs,
+                         "truncated": bool(pst.get("truncated"))})
+
+    # A cut post is ordinary prose that stops mid-sentence, so the note reads
+    # as complete. Say so on stderr, mark it in the note, and hand the ids back
+    # so the CLI can refuse to call the capture a success.
+    truncated_ids = [p["status_id"] for p in th["posts"] if p.get("truncated")]
+    suspect_ids = [p["status_id"] for p in th["posts"]
+                   if not p.get("truncated") and x_extract.ends_mid_sentence(p["content"])]
+    for sid in truncated_ids:
+        print(f"TRUNCATED_POST:https://x.com/{handle}/status/{sid}", file=sys.stderr)
+    for sid in suspect_ids:
+        print(f"POSSIBLY_TRUNCATED:https://x.com/{handle}/status/{sid}", file=sys.stderr)
 
     date = (root["timestamp"] or "")[:10] or day
     post = {
@@ -83,6 +97,7 @@ def download_open_post(page, handle, out_dir, day, download_media=True):
         "post_type": "thread" if th["is_thread"] else "post",
         "thread_length": len(th["posts"]), "metrics": root["metrics"], "media": media,
         "content": root["content"], "image_files": sections[0]["image_files"], "sections": sections,
+        "truncated": bool(root.get("truncated")), "incomplete_posts": len(truncated_ids),
         "video": root.get("video"),
     }
     # Announce video on stderr only. `OUTPUT_FILE:` must remain the sole
@@ -122,6 +137,7 @@ def download_open_post(page, handle, out_dir, day, download_media=True):
         "post_count": len(th["posts"]), "media": media,
         "author_name": root["author_name"], "date": date,
         "member_ids": [p["status_id"] for p in th["posts"]],
+        "truncated_ids": truncated_ids, "suspect_ids": suspect_ids,
     }
 
 
@@ -184,6 +200,14 @@ def main(argv):
 
     handle, _ = parse_status_url(url)
     note_path = os.path.join(out_dir, handle, result["note"])
+
+    # The note exists and marks the cut posts, but it is not a capture of the
+    # thread: no OUTPUT_FILE, so no caller summarises it as one.
+    if result.get("truncated_ids"):
+        print(f"ERROR: {len(result['truncated_ids'])} of {result['post_count']} post(s) are cut at "
+              f"\"Show more\" and could not be read in full; incomplete note at {note_path}",
+              file=sys.stderr)
+        return EXIT_INCOMPLETE
     kind = "thread" if result["is_thread"] else "post"
     print(f"captured {kind}: {result['post_count']} post(s), "
           f"{result['media']} image(s) -> {note_path}", file=sys.stderr)
